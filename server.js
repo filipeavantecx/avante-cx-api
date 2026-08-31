@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const db = require("./src/database/db");
+const authRoutes = require("./src/routes/auth");
 
 const app = express();
 
@@ -44,6 +45,7 @@ app.get("/db-test", async (req, res) => {
   }
 });
 
+app.use("/auth", authRoutes);
 app.listen(PORT, () => {
   console.log(`AVANTE CX API rodando na porta ${PORT}`);
 });
