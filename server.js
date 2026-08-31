@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const db = require("./src/database/db");
 
 const app = express();
 
@@ -22,6 +23,26 @@ app.get("/health", (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
+
+app.get("/db-test", async (req, res) => {
+  try {
+    const resultado = await db.query("SELECT NOW() AS agora");
+
+    res.json({
+      banco: "conectado",
+      servidor: "PostgreSQL",
+      agora: resultado.rows[0].agora
+    });
+
+  } catch (erro) {
+    console.error(erro);
+
+    res.status(500).json({
+      banco: "erro",
+      mensagem: erro.message
+    });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`AVANTE CX API rodando na porta ${PORT}`);
