@@ -1,3 +1,4 @@
+const crmRoutes = require("./src/routes/crm");
 const contratosRoutes = require("./src/routes/contratos");
 const authRoutes = require("./src/routes/auth");
 const express = require("express");
@@ -48,6 +49,7 @@ app.get("/db-test", async (req, res) => {
   }
 });
 
+app.use("/", crmRoutes);
 app.use("/contratos", contratosRoutes);
 app.use("/auth", authRoutes);
 app.use("/clientes", clientesRoutes);
