@@ -545,4 +545,170 @@ router.patch("/:id/ativar", async (req, res) => {
   }
 });
 
+router.post("/importar", async (req, res) => {
+  try {
+    const { clientes } = req.body;
+
+    if (!Array.isArray(clientes) || clientes.length === 0) {
+      return res.status(400).json({
+        erro: "Envie uma lista de clientes"
+      });
+    }
+
+    let inseridos = 0;
+    let ignorados = 0;
+    const erros = [];
+
+    for (const cliente of clientes) {
+      try {
+        const {
+          nome,
+          nome_fantasia,
+          razao_social,
+          tipo_pessoa,
+          cpf,
+          cnpj,
+          telefone,
+          whatsapp,
+          email,
+          cep,
+          endereco,
+          numero,
+          complemento,
+          bairro,
+          cidade,
+          estado,
+          segmento,
+          origem,
+          responsavel,
+          status,
+          etapa_jornada,
+          observacoes,
+          foto_url,
+          pasta_drive_id
+        } = cliente;
+
+        if (!nome) {
+          ignorados++;
+          continue;
+        }
+
+        if (cpf) {
+          const existeCpf = await db.query(
+            "SELECT id FROM clientes WHERE cpf = $1",
+            [cpf]
+          );
+
+          if (existeCpf.rows.length > 0) {
+            ignorados++;
+            continue;
+          }
+        }
+
+        if (cnpj) {
+          const existeCnpj = await db.query(
+            "SELECT id FROM clientes WHERE cnpj = $1",
+            [cnpj]
+          );
+
+          if (existeCnpj.rows.length > 0) {
+            ignorados++;
+            continue;
+          }
+        }
+
+        await db.query(
+          `
+            INSERT INTO clientes
+            (
+              nome,
+              nome_fantasia,
+              razao_social,
+              tipo_pessoa,
+              cpf,
+              cnpj,
+              telefone,
+              whatsapp,
+              email,
+              cep,
+              endereco,
+              numero,
+              complemento,
+              bairro,
+              cidade,
+              estado,
+              segmento,
+              origem,
+              responsavel,
+              status,
+              etapa_jornada,
+              observacoes,
+              foto_url,
+              pasta_drive_id,
+              criado_por
+            )
+            VALUES
+            (
+              $1,$2,$3,$4,$5,$6,
+              $7,$8,$9,
+              $10,$11,$12,$13,$14,$15,$16,
+              $17,$18,$19,$20,$21,$22,$23,$24,$25
+            )
+          `,
+          [
+            nome,
+            nome_fantasia || null,
+            razao_social || null,
+            tipo_pessoa || null,
+            cpf || null,
+            cnpj || null,
+            telefone || null,
+            whatsapp || null,
+            email || null,
+            cep || null,
+            endereco || null,
+            numero || null,
+            complemento || null,
+            bairro || null,
+            cidade || null,
+            estado || null,
+            segmento || null,
+            origem || null,
+            responsavel || null,
+            status || "ATIVO",
+            etapa_jornada || null,
+            observacoes || null,
+            foto_url || null,
+            pasta_drive_id || null,
+            req.usuario.id
+          ]
+        );
+
+        inseridos++;
+
+      } catch (erroCliente) {
+        erros.push({
+          nome: cliente.nome || "Sem nome",
+          erro: erroCliente.message
+        });
+      }
+    }
+
+    res.json({
+      mensagem: "Importação concluída",
+      total_recebidos: clientes.length,
+      inseridos,
+      ignorados,
+      erros
+    });
+
+  } catch (erro) {
+    console.error(erro);
+
+    res.status(500).json({
+      erro: "Erro ao importar clientes"
+    });
+  }
+});
+
 module.exports = router;
