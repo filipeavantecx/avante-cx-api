@@ -436,7 +436,7 @@ router.put("/:id", async (req, res) => {
 
 
 // ======================================================
-// EXCLUIR CLIENTE
+// ARQUIVAR / INATIVAR CLIENTE
 // ======================================================
 
 router.delete("/:id", async (req, res) => {
@@ -445,9 +445,12 @@ router.delete("/:id", async (req, res) => {
 
     const resultado = await db.query(
       `
-        DELETE FROM clientes
+        UPDATE clientes
+        SET
+          status = 'INATIVO',
+          atualizado_em = NOW()
         WHERE id = $1
-        RETURNING id, nome
+        RETURNING id, nome, status
       `,
       [id]
     );
@@ -459,7 +462,7 @@ router.delete("/:id", async (req, res) => {
     }
 
     res.json({
-      mensagem: "Cliente excluído com sucesso",
+      mensagem: "Cliente arquivado com sucesso",
       cliente: resultado.rows[0]
     });
 
@@ -467,10 +470,9 @@ router.delete("/:id", async (req, res) => {
     console.error(erro);
 
     res.status(500).json({
-      erro: "Erro ao excluir cliente"
+      erro: "Erro ao arquivar cliente"
     });
   }
 });
-
 
 module.exports = router;
