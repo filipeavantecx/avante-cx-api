@@ -8,6 +8,8 @@ const comercialRoutes = require("./src/routes/comercial");
 const financeiroRoutes = require("./src/routes/financeiro");
 const financeiroComplementarRoutes =
   require("./src/routes/financeiroComplementar");
+const relacionamentoRoutes =
+  require("./src/routes/relacionamento");
 
 const db = require("./src/database/db");
 
@@ -65,6 +67,7 @@ app.use("/", crmRoutes);
 app.use("/", comercialRoutes);
 app.use("/", financeiroRoutes);
 app.use("/", financeiroComplementarRoutes);
+app.use("/", relacionamentoRoutes);
 
 app.listen(PORT, () => {
   console.log(`AVANTE CX API rodando na porta ${PORT}`);
