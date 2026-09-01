@@ -54,37 +54,79 @@ async function validarCliente(idCliente) {
 }
 
 async function inserirContrato({ dados, usuarioId }) {
+  /*
+   * id_contrato é obrigatório no PostgreSQL.
+   * Reservamos o próximo ID da sequence antes do INSERT
+   * e já geramos CONT_000001 no mesmo comando.
+   */
   const r = await db.query(
-    `INSERT INTO contratos (
-      id_contrato,id_cliente,titulo,tipo_contrato,status,data_inicio,data_vencimento,
-      valor,descricao,nome_arquivo,id_arquivo,url_arquivo,pasta_drive_id,
-      data_cadastro,data_atualizacao,usuario_cadastro,usuario_atualizacao,
-      ativo,observacoes,criado_por
-    ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20
-    ) RETURNING *`,
+    `
+      WITH novo_id AS (
+        SELECT nextval(
+          pg_get_serial_sequence('contratos', 'id')
+        ) AS id
+      )
+      INSERT INTO contratos (
+        id,
+        id_contrato,
+        id_cliente,
+        titulo,
+        tipo_contrato,
+        status,
+        data_inicio,
+        data_vencimento,
+        valor,
+        descricao,
+        nome_arquivo,
+        id_arquivo,
+        url_arquivo,
+        pasta_drive_id,
+        data_cadastro,
+        data_atualizacao,
+        usuario_cadastro,
+        usuario_atualizacao,
+        ativo,
+        observacoes,
+        criado_por
+      )
+      SELECT
+        novo_id.id,
+        COALESCE(
+          $1,
+          'CONT_' || LPAD(novo_id.id::text, 6, '0')
+        ),
+        $2,$3,$4,$5,$6,$7,$8,$9,$10,
+        $11,$12,$13,$14,$15,$16,$17,$18,$19,$20
+      FROM novo_id
+      RETURNING *
+    `,
     [
-      dados.id_contrato,dados.id_cliente,dados.titulo,dados.tipo_contrato,dados.status,
-      dados.data_inicio,dados.data_vencimento,dados.valor,dados.descricao,dados.nome_arquivo,
-      dados.id_arquivo,dados.url_arquivo,dados.pasta_drive_id,
-      dados.data_cadastro || new Date(),dados.data_atualizacao || new Date(),
-      dados.usuario_cadastro,dados.usuario_atualizacao,dados.ativo,dados.observacoes,usuarioId
+      dados.id_contrato,
+      dados.id_cliente,
+      dados.titulo,
+      dados.tipo_contrato,
+      dados.status,
+      dados.data_inicio,
+      dados.data_vencimento,
+      dados.valor,
+      dados.descricao,
+      dados.nome_arquivo,
+      dados.id_arquivo,
+      dados.url_arquivo,
+      dados.pasta_drive_id,
+      dados.data_cadastro || new Date(),
+      dados.data_atualizacao || new Date(),
+      dados.usuario_cadastro,
+      dados.usuario_atualizacao,
+      dados.ativo,
+      dados.observacoes,
+      usuarioId
     ]
   );
 
-  let contrato = r.rows[0];
-
-  if (!contrato.id_contrato) {
-    const novoId = `CONT_${String(contrato.id).padStart(6, "0")}`;
-    const u = await db.query(
-      "UPDATE contratos SET id_contrato = $1 WHERE id = $2 RETURNING *",
-      [novoId, contrato.id]
-    );
-    contrato = u.rows[0];
-  }
-
-  return contrato;
+  return r.rows[0];
 }
+
 
 async function atualizarContrato({ id, dados }) {
   const r = await db.query(
@@ -247,7 +289,7 @@ router.post("/", async (req, res) => {
     res.status(201).json({ mensagem: "Contrato cadastrado com sucesso", contrato });
 
   } catch (e) {
-    console.error(e);
+    console.error("ERRO POST /contratos:", e);
     res.status(500).json({ erro: "Erro ao cadastrar contrato" });
   }
 });
