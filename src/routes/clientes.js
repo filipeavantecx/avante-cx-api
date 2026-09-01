@@ -802,10 +802,21 @@ router.delete("/:id", async (req, res) => {
 // ======================================================
 
 async function inserirClienteNoBanco({ dados, usuarioId }) {
+  /*
+   * O PostgreSQL exige id_cliente NOT NULL.
+   * Por isso reservamos o próximo ID da sequence antes do INSERT
+   * e já geramos CLI_000001 no mesmo comando.
+   */
   const resultado = await db.query(
     `
+      WITH novo_id AS (
+        SELECT nextval(
+          pg_get_serial_sequence('clientes', 'id')
+        ) AS id
+      )
       INSERT INTO clientes
       (
+        id,
         id_cliente,
         nome_completo,
         foto_id,
@@ -854,14 +865,18 @@ async function inserirClienteNoBanco({ dados, usuarioId }) {
         endereco,
         criado_por
       )
-      VALUES
-      (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+      SELECT
+        novo_id.id,
+        COALESCE(
+          $1,
+          'CLI_' || LPAD(novo_id.id::text, 6, '0')
+        ),
+        $2,$3,$4,$5,$6,$7,$8,$9,$10,
         $11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
         $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,
         $31,$32,$33,$34,$35,$36,$37,$38,$39,$40,
         $41,$42,$43,$44,$45,$46,$47
-      )
+      FROM novo_id
       RETURNING *
     `,
     [
@@ -915,28 +930,9 @@ async function inserirClienteNoBanco({ dados, usuarioId }) {
     ]
   );
 
-  let cliente = resultado.rows[0];
-
-  // Se o registro veio sem ID_CLIENTE, cria no padrão CLI_000001
-  // usando o ID interno do PostgreSQL.
-  if (!cliente.id_cliente) {
-    const idCliente = `CLI_${String(cliente.id).padStart(6, "0")}`;
-
-    const atualizado = await db.query(
-      `
-        UPDATE clientes
-        SET id_cliente = $1
-        WHERE id = $2
-        RETURNING *
-      `,
-      [idCliente, cliente.id]
-    );
-
-    cliente = atualizado.rows[0];
-  }
-
-  return cliente;
+  return resultado.rows[0];
 }
+
 
 async function atualizarClienteNoBanco({ id, dados, usuarioId }) {
   const resultado = await db.query(
