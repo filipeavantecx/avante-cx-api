@@ -1,11 +1,11 @@
-const crmRoutes = require("./src/routes/crm");
-const contratosRoutes = require("./src/routes/contratos");
-const authRoutes = require("./src/routes/auth");
 const express = require("express");
 const cors = require("cors");
-const db = require("./src/database/db");
+const authRoutes = require("./src/routes/auth");
 const clientesRoutes = require("./src/routes/clientes");
+const contratosRoutes = require("./src/routes/contratos");
+const crmRoutes = require("./src/routes/crm");
 
+const db = require("./src/database/db");
 
 const app = express();
 
@@ -49,10 +49,16 @@ app.get("/db-test", async (req, res) => {
   }
 });
 
-app.use("/", crmRoutes);
-app.use("/contratos", contratosRoutes);
+// IMPORTANTE: AUTH PRIMEIRO
 app.use("/auth", authRoutes);
+
+// Depois as rotas protegidas
 app.use("/clientes", clientesRoutes);
+app.use("/contratos", contratosRoutes);
+
+// CRM POR ÚLTIMO
+app.use("/", crmRoutes);
+
 app.listen(PORT, () => {
   console.log(`AVANTE CX API rodando na porta ${PORT}`);
 });
