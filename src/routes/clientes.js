@@ -475,4 +475,74 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
+router.patch("/:id/inativar", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const resultado = await db.query(
+      `
+        UPDATE clientes
+        SET status = 'INATIVO',
+            atualizado_em = NOW()
+        WHERE id = $1
+        RETURNING id, nome, status
+      `,
+      [id]
+    );
+
+    if (resultado.rows.length === 0) {
+      return res.status(404).json({
+        erro: "Cliente não encontrado"
+      });
+    }
+
+    res.json({
+      mensagem: "Cliente inativado com sucesso",
+      cliente: resultado.rows[0]
+    });
+
+  } catch (erro) {
+    console.error(erro);
+
+    res.status(500).json({
+      erro: "Erro ao inativar cliente"
+    });
+  }
+});
+
+router.patch("/:id/ativar", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const resultado = await db.query(
+      `
+        UPDATE clientes
+        SET status = 'ATIVO',
+            atualizado_em = NOW()
+        WHERE id = $1
+        RETURNING id, nome, status
+      `,
+      [id]
+    );
+
+    if (resultado.rows.length === 0) {
+      return res.status(404).json({
+        erro: "Cliente não encontrado"
+      });
+    }
+
+    res.json({
+      mensagem: "Cliente ativado com sucesso",
+      cliente: resultado.rows[0]
+    });
+
+  } catch (erro) {
+    console.error(erro);
+
+    res.status(500).json({
+      erro: "Erro ao ativar cliente"
+    });
+  }
+});
+
 module.exports = router;
