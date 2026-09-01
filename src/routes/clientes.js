@@ -504,12 +504,16 @@ router.post("/", async (req, res) => {
       mensagem: "Cliente cadastrado com sucesso",
       cliente
     });
-
   } catch (erro) {
-    console.error(erro);
+    console.error("ERRO POST /clientes:", erro);
 
     res.status(500).json({
-      erro: "Erro ao cadastrar cliente"
+      erro: "Erro ao cadastrar cliente",
+      detalhe: erro && erro.message ? erro.message : null,
+      codigo: erro && erro.code ? erro.code : null,
+      constraint: erro && erro.constraint ? erro.constraint : null,
+      coluna: erro && erro.column ? erro.column : null,
+      tabela: erro && erro.table ? erro.table : null
     });
   }
 });
