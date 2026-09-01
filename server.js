@@ -4,6 +4,7 @@ const authRoutes = require("./src/routes/auth");
 const clientesRoutes = require("./src/routes/clientes");
 const contratosRoutes = require("./src/routes/contratos");
 const crmRoutes = require("./src/routes/crm");
+const comercialRoutes = require("./src/routes/comercial");
 
 const db = require("./src/database/db");
 
@@ -52,12 +53,13 @@ app.get("/db-test", async (req, res) => {
 // IMPORTANTE: AUTH PRIMEIRO
 app.use("/auth", authRoutes);
 
-// Depois as rotas protegidas
+// ROTAS PROTEGIDAS
 app.use("/clientes", clientesRoutes);
 app.use("/contratos", contratosRoutes);
 
 // CRM POR ÚLTIMO
 app.use("/", crmRoutes);
+app.use("/", comercialRoutes);
 
 app.listen(PORT, () => {
   console.log(`AVANTE CX API rodando na porta ${PORT}`);
