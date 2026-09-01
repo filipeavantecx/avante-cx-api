@@ -11,24 +11,49 @@ router.use(verificarToken);
 // LISTAR CLIENTES
 router.get("/", async (req, res) => {
   try {
-    const resultado = await db.query(`
-      SELECT
-        id,
-        nome,
-        cpf_cnpj,
-        telefone,
-        whatsapp,
-        email,
-        cidade,
-        estado,
-        endereco,
-        observacoes,
-        status,
-        criado_em,
-        atualizado_em
-      FROM clientes
-      ORDER BY nome ASC
-    `);
+const resultado = await db.query(`
+  SELECT
+    id,
+
+    nome,
+    nome_fantasia,
+    razao_social,
+    tipo_pessoa,
+
+    cpf,
+    cnpj,
+
+    telefone,
+    whatsapp,
+    email,
+
+    cep,
+    endereco,
+    numero,
+    complemento,
+    bairro,
+    cidade,
+    estado,
+
+    segmento,
+    origem,
+    responsavel,
+
+    status,
+    etapa_jornada,
+    observacoes,
+
+    foto_url,
+    pasta_drive_id,
+
+    criado_por,
+    criado_em,
+    atualizado_em
+
+  FROM clientes
+
+  ORDER BY nome ASC
+`);
 
     res.json({
       clientes: resultado.rows
@@ -49,16 +74,35 @@ router.post("/", async (req, res) => {
   try {
 
     const {
-      nome,
-      cpf_cnpj,
-      telefone,
-      whatsapp,
-      email,
-      cidade,
-      estado,
-      endereco,
-      observacoes
-    } = req.body;
+  nome,
+  nome_fantasia,
+  razao_social,
+  tipo_pessoa,
+  cpf,
+  cnpj,
+
+  telefone,
+  whatsapp,
+  email,
+
+  cep,
+  endereco,
+  numero,
+  complemento,
+  bairro,
+  cidade,
+  estado,
+
+  segmento,
+  origem,
+  responsavel,
+
+  etapa_jornada,
+  observacoes,
+
+  foto_url,
+  pasta_drive_id
+} = req.body;
 
     if (!nome) {
       return res.status(400).json({
@@ -66,51 +110,127 @@ router.post("/", async (req, res) => {
       });
     }
 
-    const resultado = await db.query(
-      `
-        INSERT INTO clientes
-        (
-          nome,
-          cpf_cnpj,
-          telefone,
-          whatsapp,
-          email,
-          cidade,
-          estado,
-          endereco,
-          observacoes
-        )
-        VALUES
-        ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+if (tipo_pessoa === "PF" && !cpf) {
+  return res.status(400).json({
+    erro: "CPF é obrigatório para pessoa física"
+  });
+}
 
-        RETURNING *
-      `,
-      [
-        nome,
-        cpf_cnpj || null,
-        telefone || null,
-        whatsapp || null,
-        email || null,
-        cidade || null,
-        estado || null,
-        endereco || null,
-        observacoes || null
-      ]
-    );
+if (tipo_pessoa === "PJ" && !cnpj) {
+  return res.status(400).json({
+    erro: "CNPJ é obrigatório para pessoa jurídica"
+  });
+}
 
-    res.status(201).json({
-      mensagem: "Cliente cadastrado com sucesso",
-      cliente: resultado.rows[0]
-    });
+if (cpf) {
+  const cpfExistente = await db.query(
+    "SELECT id FROM clientes WHERE cpf = $1",
+    [cpf]
+  );
 
-  } catch (erro) {
-    console.error(erro);
-
-    res.status(500).json({
-      erro: "Erro ao cadastrar cliente"
+  if (cpfExistente.rows.length > 0) {
+    return res.status(409).json({
+      erro: "Já existe um cliente cadastrado com este CPF"
     });
   }
-});
+}
+
+if (cnpj) {
+  const cnpjExistente = await db.query(
+    "SELECT id FROM clientes WHERE cnpj = $1",
+    [cnpj]
+  );
+
+  if (cnpjExistente.rows.length > 0) {
+    return res.status(409).json({
+      erro: "Já existe um cliente cadastrado com este CNPJ"
+    });
+  }
+}
+
+ 
+      const resultado = await db.query(
+  `
+    INSERT INTO clientes
+    (
+      nome,
+      nome_fantasia,
+      razao_social,
+      tipo_pessoa,
+      cpf,
+      cnpj,
+
+      telefone,
+      whatsapp,
+      email,
+
+      cep,
+      endereco,
+      numero,
+      complemento,
+      bairro,
+      cidade,
+      estado,
+
+      segmento,
+      origem,
+      responsavel,
+
+      etapa_jornada,
+      observacoes,
+
+      foto_url,
+      pasta_drive_id,
+
+      criado_por
+    )
+
+    VALUES
+    (
+      $1,$2,$3,$4,$5,$6,
+      $7,$8,$9,
+      $10,$11,$12,$13,$14,$15,$16,
+      $17,$18,$19,
+      $20,$21,
+      $22,$23,
+      $24
+    )
+
+    RETURNING *
+  `,
+  [
+    nome,
+    nome_fantasia || null,
+    razao_social || null,
+    tipo_pessoa || null,
+    cpf || null,
+    cnpj || null,
+
+    telefone || null,
+    whatsapp || null,
+    email || null,
+
+    cep || null,
+    endereco || null,
+    numero || null,
+    complemento || null,
+    bairro || null,
+    cidade || null,
+    estado || null,
+
+    segmento || null,
+    origem || null,
+    responsavel || null,
+
+    etapa_jornada || null,
+    observacoes || null,
+
+    foto_url || null,
+    pasta_drive_id || null,
+
+    req.usuario.id
+  ]
+);
 
 // BUSCAR CLIENTE POR ID
 router.get("/:id", async (req, res) => {
