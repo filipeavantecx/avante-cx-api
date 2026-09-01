@@ -1,8 +1,10 @@
+const contratosRoutes = require("./src/routes/contratos");
 const authRoutes = require("./src/routes/auth");
 const express = require("express");
 const cors = require("cors");
 const db = require("./src/database/db");
 const clientesRoutes = require("./src/routes/clientes");
+
 
 const app = express();
 
@@ -46,6 +48,7 @@ app.get("/db-test", async (req, res) => {
   }
 });
 
+app.use("/contratos", contratosRoutes);
 app.use("/auth", authRoutes);
 app.use("/clientes", clientesRoutes);
 app.listen(PORT, () => {
