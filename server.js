@@ -10,6 +10,8 @@ const financeiroComplementarRoutes =
   require("./src/routes/financeiroComplementar");
 const relacionamentoRoutes =
   require("./src/routes/relacionamento");
+const administrativoRoutes =
+  require("./src/routes/administrativo");
 
 const db = require("./src/database/db");
 
@@ -55,19 +57,22 @@ app.get("/db-test", async (req, res) => {
   }
 });
 
-// IMPORTANTE: AUTH PRIMEIRO
+// AUTH PRIMEIRO
 app.use("/auth", authRoutes);
 
 // ROTAS PROTEGIDAS
 app.use("/clientes", clientesRoutes);
 app.use("/contratos", contratosRoutes);
 
-// CRM POR ÚLTIMO
+// CRM
 app.use("/", crmRoutes);
 app.use("/", comercialRoutes);
 app.use("/", financeiroRoutes);
 app.use("/", financeiroComplementarRoutes);
 app.use("/", relacionamentoRoutes);
+
+// ADMINISTRATIVO
+app.use("/", administrativoRoutes);
 
 app.listen(PORT, () => {
   console.log(`AVANTE CX API rodando na porta ${PORT}`);
