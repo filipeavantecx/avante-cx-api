@@ -161,6 +161,26 @@ router.use(verificarTokenClientesHibrido_);
 // HELPERS
 // ======================================================
 
+function usuarioAuditoriaTexto_(req) {
+  const u = req.usuario || {};
+
+  return (
+    u.email ||
+    u.login ||
+    u.idLegado ||
+    (u.id !== undefined && u.id !== null ? `usuario:${u.id}` : "") ||
+    "SISTEMA"
+  );
+}
+
+function usuarioAuditoriaId_(req) {
+  const numero = Number(req.usuario?.id);
+
+  return Number.isInteger(numero) && numero > 0
+    ? numero
+    : null;
+}
+
 function valorOuNull(valor) {
   if (valor === undefined || valor === null || valor === "") {
     return null;
