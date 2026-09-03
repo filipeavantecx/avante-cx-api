@@ -130,6 +130,84 @@ async function verificarTokenCrmAgenda_(req, res, next) {
   }
 }
 
+
+// ======================================================
+// DIAGNÓSTICO TEMPORÁRIO DE JWT CRM - PÚBLICO
+// Colocado ANTES do router.use para diagnosticar o Bearer.
+// Não expõe token nem segredos.
+// REMOVER APÓS O TESTE.
+// ======================================================
+router.get("/debug-token", async (req, res) => {
+  try {
+    const cabecalho = String(req.headers.authorization || "");
+    const token = cabecalho.startsWith("Bearer ")
+      ? cabecalho.slice(7).trim()
+      : "";
+
+    if (!token) {
+      return res.status(200).json({
+        sucesso: true,
+        rotaDebugAtiva: true,
+        tokenRecebido: false,
+        mensagem: "Rota de diagnóstico publicada. Nenhum Bearer foi enviado."
+      });
+    }
+
+    const partes = token.split(".");
+    let decode = null;
+    try {
+      decode = jwt.decode(token) || null;
+    } catch (e) {}
+
+    let validado = null;
+    let erroValidacao = null;
+
+    try {
+      validado = jwt.verify(
+        token,
+        segredoCrmJwtAgenda_(),
+        {
+          issuer: "avante-cx",
+          audience: "avante-cx-web"
+        }
+      );
+    } catch (erro) {
+      erroValidacao = {
+        nome: erro?.name || "",
+        mensagem: erro?.message || ""
+      };
+    }
+
+    return res.status(200).json({
+      sucesso: true,
+      rotaDebugAtiva: true,
+      tokenRecebido: true,
+      partesJwt: partes.length,
+      jwtFormatoValido: partes.length === 3,
+      segredoCrmDedicadoConfigurado:
+        !!String(process.env.CRM_JWT_SECRET || "").trim(),
+      jwtSecretBaseConfigurado:
+        !!String(process.env.JWT_SECRET || "").trim(),
+      decode: decode ? {
+        tipo: decode.tipo || null,
+        id: decode.id || null,
+        issuer: decode.iss || null,
+        audience: decode.aud || null,
+        exp: decode.exp || null,
+        iat: decode.iat || null
+      } : null,
+      tokenValidoAgenda: !!validado,
+      erroValidacao
+    });
+  } catch (erro) {
+    return res.status(200).json({
+      sucesso: false,
+      rotaDebugAtiva: true,
+      erro: erro?.message || "Erro interno"
+    });
+  }
+});
+
 router.use(verificarTokenCrmAgenda_);
 
 
@@ -378,97 +456,6 @@ async function removerEventoGoogleNode_(eventId) {
       "?sendUpdates=all"
   );
 }
-
-
-// ======================================================
-// DIAGNÓSTICO TEMPORÁRIO DE JWT CRM - REMOVER APÓS TESTE
-// Não expõe o token nem segredos.
-// ======================================================
-router.get("/debug-token", async (req, res) => {
-  try {
-    const cabecalho = String(req.headers.authorization || "");
-    const token = cabecalho.startsWith("Bearer ")
-      ? cabecalho.slice(7).trim()
-      : "";
-
-    if (!token) {
-      return res.status(401).json({
-        sucesso: false,
-        etapa: "cabecalho",
-        tokenRecebido: false,
-        erro: "Authorization Bearer não recebido"
-      });
-    }
-
-    const partes = token.split(".");
-    let payloadSemValidar = null;
-
-    try {
-      payloadSemValidar = jwt.decode(token) || null;
-    } catch (e) {}
-
-    let payloadValidado = null;
-    let erroValidacao = null;
-
-    try {
-      payloadValidado = jwt.verify(
-        token,
-        segredoCrmJwtAgenda_(),
-        {
-          issuer: "avante-cx",
-          audience: "avante-cx-web"
-        }
-      );
-    } catch (erro) {
-      erroValidacao = {
-        nome: erro?.name || "",
-        mensagem: erro?.message || ""
-      };
-    }
-
-    return res
-      .status(payloadValidado ? 200 : 401)
-      .json({
-        sucesso: !!payloadValidado,
-        tokenRecebido: true,
-        partesJwt: partes.length,
-        jwtFormatoValido: partes.length === 3,
-        segredoCrmDedicadoConfigurado:
-          !!String(process.env.CRM_JWT_SECRET || "").trim(),
-        jwtSecretBaseConfigurado:
-          !!String(process.env.JWT_SECRET || "").trim(),
-        decode: payloadSemValidar
-          ? {
-              tipo: payloadSemValidar.tipo || null,
-              id: payloadSemValidar.id || null,
-              issuer: payloadSemValidar.iss || null,
-              audience: payloadSemValidar.aud || null,
-              exp: payloadSemValidar.exp || null,
-              iat: payloadSemValidar.iat || null
-            }
-          : null,
-        validado: payloadValidado
-          ? {
-              tipo: payloadValidado.tipo || null,
-              id: payloadValidado.id || null,
-              issuer: payloadValidado.iss || null,
-              audience: payloadValidado.aud || null,
-              exp: payloadValidado.exp || null,
-              iat: payloadValidado.iat || null
-            }
-          : null,
-        erroValidacao
-      });
-
-  } catch (erro) {
-    return res.status(500).json({
-      sucesso: false,
-      etapa: "debug-token",
-      erro: erro?.message || "Erro interno"
-    });
-  }
-});
-
 
 router.get("/google-status", async (req, res) => {
   try {
