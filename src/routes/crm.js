@@ -1,9 +1,137 @@
-const express = require("express");
+﻿const express = require("express");
 const db = require("../database/db");
 const verificarToken = require("../middleware/auth");
+const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 
 const router = express.Router();
-router.use(verificarToken);
+
+function segredoCrmJwtJornada_() {
+  const dedicado = String(process.env.CRM_JWT_SECRET || "").trim();
+  if (dedicado) return dedicado;
+
+  const base = String(process.env.JWT_SECRET || "").trim();
+
+  if (!base) {
+    throw new Error("JWT_SECRET não configurado no Railway");
+  }
+
+  return crypto
+    .createHmac("sha256", base)
+    .update("AVANTE_CRM_WEB_V1", "utf8")
+    .digest("hex");
+}
+
+function boolJornada_(valor) {
+  if (valor === true || valor === 1) return true;
+
+  return ["TRUE", "1", "SIM", "S", "YES", "Y"]
+    .includes(String(valor || "").trim().toUpperCase());
+}
+
+async function verificarTokenCrmJornada_(req, res, next) {
+  try {
+    const cabecalho = String(req.headers.authorization || "");
+    const token = cabecalho.startsWith("Bearer ")
+      ? cabecalho.slice(7).trim()
+      : "";
+
+    if (!token) {
+      return res.status(401).json({
+        autenticado: false,
+        erro: "Sessão não informada"
+      });
+    }
+
+    const payload = jwt.verify(
+      token,
+      segredoCrmJwtJornada_(),
+      {
+        issuer: "avante-cx",
+        audience: "avante-cx-web"
+      }
+    );
+
+    if (payload.tipo !== "crm") {
+      return res.status(401).json({
+        autenticado: false,
+        erro: "Token CRM inválido"
+      });
+    }
+
+    const r = await db.query(
+      `SELECT
+         usuario_id,
+         nome,
+         email,
+         login,
+         perfil,
+         status,
+         pode_jornada
+       FROM usuarios_legado
+       WHERE usuario_id = $1
+       LIMIT 1`,
+      [payload.id]
+    );
+
+    if (!r.rows.length) {
+      return res.status(401).json({
+        autenticado: false,
+        erro: "Usuário não encontrado"
+      });
+    }
+
+    const usuario = r.rows[0];
+
+    if (String(usuario.status || "").trim().toUpperCase() !== "ATIVO") {
+      return res.status(403).json({
+        autenticado: false,
+        erro: "Usuário inativo"
+      });
+    }
+
+    const perfil = String(usuario.perfil || "").trim().toUpperCase();
+
+    const permitido =
+      boolJornada_(usuario.pode_jornada) ||
+      ["ADMINISTRADOR", "GESTOR", "MENTOR"].includes(perfil);
+
+    if (!permitido) {
+      return res.status(403).json({
+        erro: "Você não possui permissão para acessar Jornada."
+      });
+    }
+
+    req.usuarioCrm = {
+      id: usuario.usuario_id,
+      nome: usuario.nome || "",
+      email: usuario.email || "",
+      login: usuario.login || "",
+      perfil: usuario.perfil || ""
+    };
+
+    return next();
+
+  } catch (erro) {
+    return res.status(401).json({
+      autenticado: false,
+      expirada: erro?.name === "TokenExpiredError",
+      erro: "Sessão inválida ou expirada"
+    });
+  }
+}
+
+/*
+ * As rotas /crm-jornada/* usam o novo JWT CRM.
+ * As rotas antigas continuam usando o token técnico anterior.
+ */
+router.use((req, res, next) => {
+  if (req.path.startsWith("/crm-jornada")) {
+    return verificarTokenCrmJornada_(req, res, next);
+  }
+
+  return verificarToken(req, res, next);
+});
 
 // ======================================================
 // HELPERS
@@ -478,6 +606,596 @@ router.post("/atividades/importar", async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ erro: "Erro ao importar atividades" });
+  }
+});
+
+
+// ======================================================
+// JORNADA CRM - RUNTIME WEB
+// Navegador -> Railway/Node -> PostgreSQL
+// ======================================================
+
+function registroMetaWeb_(row) {
+  row = row || {};
+
+  return {
+    ID_META: row.meta_id || "",
+    ID_CLIENTE: row.cliente_id || "",
+    JORNADA_ID: row.jornada_id || "",
+    TITULO: row.meta || row.descricao || "Meta",
+    DESCRICAO: row.descricao || "",
+    CATEGORIA: row.categoria || "",
+    INDICADOR: row.indicador || "",
+    VALOR_INICIAL: Number(row.valor_inicial || 0),
+    VALOR_ATUAL: Number(row.valor_atual || 0),
+    VALOR_META: Number(row.valor_meta || 0),
+    UNIDADE: row.unidade || "",
+    DATA_INICIO: row.data_inicio || "",
+    DATA_PREVISTA: row.data_limite || "",
+    DATA_LIMITE: row.data_limite || "",
+    PERCENTUAL_CONCLUSAO: Number(row.percentual || 0),
+    STATUS: row.status || "PENDENTE",
+    PRIORIDADE: row.prioridade || "MEDIA",
+    OBSERVACOES: row.observacoes || ""
+  };
+}
+
+function registroAtividadeWeb_(row) {
+  row = row || {};
+
+  return {
+    ID_ATIVIDADE: row.atividade_id || "",
+    ID_CLIENTE: row.cliente_id || "",
+    ID_SESSAO: row.sessao_id || "",
+    TITULO: row.descricao || "Atividade",
+    DESCRICAO: row.observacoes || "",
+    CATEGORIA: row.categoria || "",
+    PRIORIDADE: row.prioridade || "MEDIA",
+    STATUS: row.status || "PENDENTE",
+    RESPONSAVEL: row.mentor_id || "",
+    DATA_CRIACAO: row.data_criacao || "",
+    PRAZO: row.prazo || "",
+    DATA_CONCLUSAO: row.data_conclusao || "",
+    RESULTADO: row.resultado || ""
+  };
+}
+
+function registroSessaoWeb_(row) {
+  row = row || {};
+
+  return {
+    ID_SESSAO: row.sessao_id || "",
+    ID_CLIENTE: row.cliente_id || "",
+    DATA: row.data || "",
+    HORA_INICIO: row.hora_inicio || "",
+    HORA_FIM: row.hora_fim || "",
+    TIPO_SESSAO: row.tipo || "Mentoria",
+    FORMATO: row.formato || "",
+    MENTOR_CONSULTOR: row.mentor_id || "",
+    STATUS: row.status || "AGENDADA",
+    PAUTA: row.tema || "",
+    RESUMO: row.objetivo || "",
+    OBSERVACOES: row.observacoes || ""
+  };
+}
+
+function percentualMetaWeb_(inicial, meta, atual) {
+  inicial = Number(inicial || 0);
+  meta = Number(meta || 0);
+  atual = Number(atual || 0);
+
+  const distancia = meta - inicial;
+
+  if (!distancia) {
+    return atual >= meta && meta !== 0 ? 100 : 0;
+  }
+
+  return Math.max(
+    0,
+    Math.min(
+      100,
+      Number((((atual - inicial) / distancia) * 100).toFixed(2))
+    )
+  );
+}
+
+router.get("/crm-jornada/resumo/:cliente_id", async (req, res) => {
+  try {
+    const clienteId = String(req.params.cliente_id || "").trim();
+
+    if (!clienteId) {
+      return res.status(400).json({ erro: "CLIENTE_ID obrigatório" });
+    }
+
+    const [clienteR, jornadaR, metasR, atividadesR, sessoesR] =
+      await Promise.all([
+        db.query(
+          `SELECT *
+           FROM clientes
+           WHERE id_cliente = $1
+           LIMIT 1`,
+          [clienteId]
+        ),
+
+        db.query(
+          `SELECT *
+           FROM jornada
+           WHERE cliente_id = $1
+           ORDER BY data_entrada DESC NULLS LAST, id DESC
+           LIMIT 1`,
+          [clienteId]
+        ),
+
+        db.query(
+          `SELECT *
+           FROM metas
+           WHERE cliente_id = $1
+           ORDER BY data_limite DESC NULLS LAST, id DESC`,
+          [clienteId]
+        ),
+
+        db.query(
+          `SELECT *
+           FROM atividades
+           WHERE cliente_id = $1
+           ORDER BY data_criacao DESC NULLS LAST, id DESC`,
+          [clienteId]
+        ),
+
+        db.query(
+          `SELECT *
+           FROM sessoes
+           WHERE cliente_id = $1
+           ORDER BY data DESC NULLS LAST, hora_inicio DESC NULLS LAST`,
+          [clienteId]
+        )
+      ]);
+
+    if (!clienteR.rows.length) {
+      return res.status(404).json({ erro: "Cliente não encontrado" });
+    }
+
+    const c = clienteR.rows[0];
+    const j = jornadaR.rows[0] || {};
+
+    return res.json({
+      sucesso: true,
+      fonte: "API_POSTGRESQL",
+      cliente: {
+        ID_CLIENTE: c.id_cliente || "",
+        NOME_COMPLETO: c.nome_completo || "",
+        EMPRESA: c.empresa || "",
+        ETAPA_JORNADA: c.etapa_jornada || j.etapa || "",
+        HEALTH_SCORE: Number(c.health_score ?? j.score ?? 0),
+        OBJETIVO_PRINCIPAL: c.objetivo_principal || "",
+        META_PRINCIPAL: c.meta_principal || "",
+        PROXIMA_SESSAO: c.proxima_sessao || "",
+        MENTOR_CONSULTOR: c.mentor_consultor || ""
+      },
+      jornada: {
+        JORNADA_ID: j.jornada_id || "",
+        ID_CLIENTE: clienteId,
+        ETAPA_JORNADA: j.etapa || c.etapa_jornada || "",
+        HEALTH_SCORE: Number(j.score ?? c.health_score ?? 0),
+        OBJETIVO_PRINCIPAL: c.objetivo_principal || "",
+        META_PRINCIPAL: c.meta_principal || "",
+        MENTOR_CONSULTOR: c.mentor_consultor || ""
+      },
+      metas: metasR.rows.map(registroMetaWeb_),
+      atividades: atividadesR.rows.map(registroAtividadeWeb_),
+      sessoes: sessoesR.rows.map(registroSessaoWeb_)
+    });
+
+  } catch (erro) {
+    console.error("crm-jornada/resumo:", erro);
+    return res.status(500).json({
+      erro: "Erro ao carregar jornada",
+      detalhe: erro?.message || null
+    });
+  }
+});
+
+router.post("/crm-jornada/metas", async (req, res) => {
+  try {
+    const d = req.body || {};
+    const clienteId = vazioNull(d.ID_CLIENTE ?? d.cliente_id);
+
+    if (!clienteId || !(await existeCliente(clienteId))) {
+      return res.status(400).json({ erro: "CLIENTE_ID inválido" });
+    }
+
+    const titulo = vazioNull(d.TITULO ?? d.meta);
+    if (!titulo) {
+      return res.status(400).json({ erro: "Título da meta obrigatório" });
+    }
+
+    const valorInicial = numeroNull(d.VALOR_INICIAL ?? d.valor_inicial) ?? 0;
+    const valorMeta = numeroNull(d.VALOR_META ?? d.valor_meta) ?? 0;
+    const valorAtual = numeroNull(d.VALOR_ATUAL ?? d.valor_atual) ?? 0;
+
+    const percentual = percentualMetaWeb_(
+      valorInicial,
+      valorMeta,
+      valorAtual
+    );
+
+    const r = await db.query(
+      `INSERT INTO metas
+       (
+         cliente_id,
+         categoria,
+         meta,
+         descricao,
+         valor_inicial,
+         valor_atual,
+         valor_meta,
+         data_inicio,
+         data_limite,
+         percentual,
+         status,
+         observacoes
+       )
+       VALUES
+       ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       RETURNING *`,
+      [
+        clienteId,
+        vazioNull(d.CATEGORIA ?? d.categoria),
+        titulo,
+        vazioNull(d.DESCRICAO ?? d.descricao),
+        valorInicial,
+        valorAtual,
+        valorMeta,
+        vazioNull(d.DATA_INICIO ?? d.data_inicio) || new Date(),
+        vazioNull(
+          d.DATA_PREVISTA ??
+          d.DATA_LIMITE ??
+          d.data_limite
+        ),
+        percentual,
+        vazioNull(d.STATUS ?? d.status) || "PENDENTE",
+        vazioNull(d.OBSERVACOES ?? d.observacoes)
+      ]
+    );
+
+    let row = r.rows[0];
+
+    if (!row.meta_id) {
+      const metaId = novoId("MET", row.id);
+
+      const u = await db.query(
+        `UPDATE metas
+         SET meta_id = $1
+         WHERE id = $2
+         RETURNING *`,
+        [metaId, row.id]
+      );
+
+      row = u.rows[0];
+    }
+
+    return res.status(201).json({
+      sucesso: true,
+      mensagem: "Meta criada com sucesso.",
+      meta: registroMetaWeb_(row)
+    });
+
+  } catch (erro) {
+    console.error("crm-jornada/metas POST:", erro);
+    return res.status(500).json({
+      erro: "Erro ao salvar meta: " + (erro?.message || "erro interno")
+    });
+  }
+});
+
+router.put("/crm-jornada/metas/:id", async (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim();
+    const d = req.body || {};
+
+    const atualR = await db.query(
+      `SELECT * FROM metas
+       WHERE meta_id = $1 OR id::text = $1
+       LIMIT 1`,
+      [id]
+    );
+
+    if (!atualR.rows.length) {
+      return res.status(404).json({ erro: "Meta não encontrada" });
+    }
+
+    const atual = atualR.rows[0];
+
+    const valorInicial =
+      numeroNull(d.VALOR_INICIAL ?? d.valor_inicial) ??
+      Number(atual.valor_inicial || 0);
+
+    const valorMeta =
+      numeroNull(d.VALOR_META ?? d.valor_meta) ??
+      Number(atual.valor_meta || 0);
+
+    const valorAtual =
+      numeroNull(d.VALOR_ATUAL ?? d.valor_atual) ??
+      Number(atual.valor_atual || 0);
+
+    const status =
+      vazioNull(d.STATUS ?? d.status) ||
+      atual.status ||
+      "PENDENTE";
+
+    const percentual =
+      String(status).toUpperCase() === "CONCLUIDA"
+        ? 100
+        : percentualMetaWeb_(valorInicial, valorMeta, valorAtual);
+
+    const r = await db.query(
+      `UPDATE metas SET
+         categoria = COALESCE($1, categoria),
+         meta = COALESCE($2, meta),
+         descricao = COALESCE($3, descricao),
+         valor_inicial = $4,
+         valor_atual = $5,
+         valor_meta = $6,
+         data_limite = COALESCE($7, data_limite),
+         percentual = $8,
+         status = $9,
+         observacoes = COALESCE($10, observacoes),
+         atualizado_em = NOW()
+       WHERE id = $11
+       RETURNING *`,
+      [
+        vazioNull(d.CATEGORIA ?? d.categoria),
+        vazioNull(d.TITULO ?? d.meta),
+        vazioNull(d.DESCRICAO ?? d.descricao),
+        valorInicial,
+        valorAtual,
+        valorMeta,
+        vazioNull(
+          d.DATA_PREVISTA ??
+          d.DATA_LIMITE ??
+          d.data_limite
+        ),
+        percentual,
+        status,
+        vazioNull(d.OBSERVACOES ?? d.observacoes),
+        atual.id
+      ]
+    );
+
+    return res.json({
+      sucesso: true,
+      mensagem: "Meta atualizada com sucesso.",
+      meta: registroMetaWeb_(r.rows[0])
+    });
+
+  } catch (erro) {
+    console.error("crm-jornada/metas PUT:", erro);
+    return res.status(500).json({
+      erro: "Erro ao atualizar meta: " + (erro?.message || "erro interno")
+    });
+  }
+});
+
+router.post("/crm-jornada/atividades", async (req, res) => {
+  try {
+    const d = req.body || {};
+    const clienteId = vazioNull(d.ID_CLIENTE ?? d.cliente_id);
+
+    if (!clienteId || !(await existeCliente(clienteId))) {
+      return res.status(400).json({ erro: "CLIENTE_ID inválido" });
+    }
+
+    const titulo = vazioNull(d.TITULO ?? d.descricao);
+
+    if (!titulo) {
+      return res.status(400).json({ erro: "Título da atividade obrigatório" });
+    }
+
+    const r = await db.query(
+      `INSERT INTO atividades
+       (
+         cliente_id,
+         mentor_id,
+         descricao,
+         categoria,
+         data_criacao,
+         prazo,
+         prioridade,
+         status,
+         observacoes
+       )
+       VALUES ($1,$2,$3,$4,NOW(),$5,$6,$7,$8)
+       RETURNING *`,
+      [
+        clienteId,
+        vazioNull(d.RESPONSAVEL ?? d.mentor_id),
+        titulo,
+        vazioNull(d.CATEGORIA ?? d.categoria),
+        vazioNull(d.PRAZO ?? d.prazo),
+        vazioNull(d.PRIORIDADE ?? d.prioridade) || "MEDIA",
+        vazioNull(d.STATUS ?? d.status) || "PENDENTE",
+        vazioNull(d.DESCRICAO ?? d.observacoes)
+      ]
+    );
+
+    let row = r.rows[0];
+
+    if (!row.atividade_id) {
+      const atividadeId = novoId("ATI", row.id);
+
+      const u = await db.query(
+        `UPDATE atividades
+         SET atividade_id = $1
+         WHERE id = $2
+         RETURNING *`,
+        [atividadeId, row.id]
+      );
+
+      row = u.rows[0];
+    }
+
+    return res.status(201).json({
+      sucesso: true,
+      mensagem: "Atividade criada com sucesso.",
+      atividade: registroAtividadeWeb_(row)
+    });
+
+  } catch (erro) {
+    console.error("crm-jornada/atividades POST:", erro);
+    return res.status(500).json({
+      erro: "Erro ao salvar atividade: " + (erro?.message || "erro interno")
+    });
+  }
+});
+
+router.put("/crm-jornada/atividades/:id", async (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim();
+    const d = req.body || {};
+
+    const atualR = await db.query(
+      `SELECT * FROM atividades
+       WHERE atividade_id = $1 OR id::text = $1
+       LIMIT 1`,
+      [id]
+    );
+
+    if (!atualR.rows.length) {
+      return res.status(404).json({ erro: "Atividade não encontrada" });
+    }
+
+    const atual = atualR.rows[0];
+
+    const r = await db.query(
+      `UPDATE atividades SET
+         mentor_id = COALESCE($1, mentor_id),
+         descricao = COALESCE($2, descricao),
+         categoria = COALESCE($3, categoria),
+         prazo = COALESCE($4, prazo),
+         prioridade = COALESCE($5, prioridade),
+         status = COALESCE($6, status),
+         data_conclusao =
+           CASE
+             WHEN UPPER(COALESCE($6, status, '')) = 'CONCLUIDA'
+             THEN COALESCE(data_conclusao, NOW())
+             ELSE data_conclusao
+           END,
+         observacoes = COALESCE($7, observacoes),
+         atualizado_em = NOW()
+       WHERE id = $8
+       RETURNING *`,
+      [
+        vazioNull(d.RESPONSAVEL ?? d.mentor_id),
+        vazioNull(d.TITULO ?? d.descricao),
+        vazioNull(d.CATEGORIA ?? d.categoria),
+        vazioNull(d.PRAZO ?? d.prazo),
+        vazioNull(d.PRIORIDADE ?? d.prioridade),
+        vazioNull(d.STATUS ?? d.status),
+        vazioNull(d.DESCRICAO ?? d.observacoes),
+        atual.id
+      ]
+    );
+
+    return res.json({
+      sucesso: true,
+      mensagem: "Atividade atualizada com sucesso.",
+      atividade: registroAtividadeWeb_(r.rows[0])
+    });
+
+  } catch (erro) {
+    console.error("crm-jornada/atividades PUT:", erro);
+    return res.status(500).json({
+      erro: "Erro ao atualizar atividade: " + (erro?.message || "erro interno")
+    });
+  }
+});
+
+router.post("/crm-jornada/sessoes", async (req, res) => {
+  try {
+    const d = req.body || {};
+    const clienteId = vazioNull(d.ID_CLIENTE ?? d.cliente_id);
+
+    if (!clienteId || !(await existeCliente(clienteId))) {
+      return res.status(400).json({ erro: "CLIENTE_ID inválido" });
+    }
+
+    const r = await db.query(
+      `INSERT INTO sessoes
+       (
+         cliente_id,
+         mentor_id,
+         data,
+         hora_inicio,
+         hora_fim,
+         tipo,
+         tema,
+         objetivo,
+         status,
+         observacoes
+       )
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       RETURNING *`,
+      [
+        clienteId,
+        vazioNull(d.MENTOR_CONSULTOR ?? d.mentor_id),
+        vazioNull(d.DATA ?? d.data) || new Date(),
+        vazioNull(d.HORA_INICIO ?? d.hora_inicio),
+        vazioNull(d.HORA_FIM ?? d.hora_fim),
+        vazioNull(d.TIPO_SESSAO ?? d.tipo) || "Mentoria",
+        vazioNull(d.PAUTA ?? d.tema),
+        vazioNull(d.RESUMO ?? d.objetivo),
+        vazioNull(d.STATUS ?? d.status) || "AGENDADA",
+        vazioNull(d.OBSERVACOES ?? d.observacoes)
+      ]
+    );
+
+    let row = r.rows[0];
+
+    if (!row.sessao_id) {
+      const sessaoId = novoId("SES", row.id);
+
+      const u = await db.query(
+        `UPDATE sessoes
+         SET sessao_id = $1
+         WHERE id = $2
+         RETURNING *`,
+        [sessaoId, row.id]
+      );
+
+      row = u.rows[0];
+    }
+
+    /*
+     * Atualiza próxima sessão no cliente quando a coluna existe.
+     * Se a instalação ainda não tiver essa coluna, a sessão continua salva.
+     */
+    try {
+      await db.query(
+        `UPDATE clientes
+         SET proxima_sessao = $1,
+             atualizado_em = NOW()
+         WHERE id_cliente = $2`,
+        [row.data, clienteId]
+      );
+    } catch (e) {
+      console.warn(
+        "Sessão salva; próxima sessão do cliente não atualizada:",
+        e?.message || e
+      );
+    }
+
+    return res.status(201).json({
+      sucesso: true,
+      mensagem: "Sessão criada com sucesso.",
+      sessao: registroSessaoWeb_(row),
+      sincronizadoGoogle: false
+    });
+
+  } catch (erro) {
+    console.error("crm-jornada/sessoes POST:", erro);
+    return res.status(500).json({
+      erro: "Erro ao salvar sessão: " + (erro?.message || "erro interno")
+    });
   }
 });
 
