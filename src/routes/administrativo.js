@@ -498,6 +498,300 @@ router.post("/usuarios-legado/importar", async (req, res) => {
 
 
 // ======================================================
+// USUÁRIOS LEGADO - RUNTIME API / POSTGRESQL
+// ======================================================
+
+const CAMPOS_USUARIO_LEGADO_RUNTIME = [
+  "nome","email","login","senha_hash","senha_salt",
+  "perfil","status","id_funcionario","pode_dashboard","pode_clientes",
+  "pode_jornada","pode_financeiro","pode_produtos","pode_agenda",
+  "pode_funcionarios","pode_relatorios","pode_configuracoes",
+  "pode_usuarios","primeiro_acesso","codigo_recuperacao_hash",
+  "recuperacao_expira_em","ultima_troca_senha","data_cadastro",
+  "data_atualizacao","ultimo_acesso","usuario_cadastro","foto_id","foto_url"
+];
+
+function mapearUsuarioLegadoRuntime(x = {}) {
+  return {
+    nome: pegar(x,"NOME"),
+    email: pegar(x,"EMAIL"),
+    login: pegar(x,"LOGIN"),
+    senha_hash: pegar(x,"SENHA_HASH"),
+    senha_salt: pegar(x,"SENHA_SALT"),
+    perfil: pegar(x,"PERFIL"),
+    status: pegar(x,"STATUS"),
+    id_funcionario: pegar(x,"ID_FUNCIONARIO"),
+    pode_dashboard: bool(x,"PODE_DASHBOARD"),
+    pode_clientes: bool(x,"PODE_CLIENTES"),
+    pode_jornada: bool(x,"PODE_JORNADA"),
+    pode_financeiro: bool(x,"PODE_FINANCEIRO"),
+    pode_produtos: bool(x,"PODE_PRODUTOS"),
+    pode_agenda: bool(x,"PODE_AGENDA"),
+    pode_funcionarios: bool(x,"PODE_FUNCIONARIOS"),
+    pode_relatorios: bool(x,"PODE_RELATORIOS"),
+    pode_configuracoes: bool(x,"PODE_CONFIGURACOES"),
+    pode_usuarios: bool(x,"PODE_USUARIOS"),
+    primeiro_acesso: bool(x,"PRIMEIRO_ACESSO"),
+    codigo_recuperacao_hash: pegar(x,"CODIGO_RECUPERACAO_HASH"),
+    recuperacao_expira_em: pegar(x,"RECUPERACAO_EXPIRA_EM"),
+    ultima_troca_senha: pegar(x,"ULTIMA_TROCA_SENHA"),
+    data_cadastro: pegar(x,"DATA_CADASTRO"),
+    data_atualizacao: pegar(x,"DATA_ATUALIZACAO"),
+    ultimo_acesso: pegar(x,"ULTIMO_ACESSO"),
+    usuario_cadastro: pegar(x,"USUARIO_CADASTRO"),
+    foto_id: pegar(x,"FOTO_ID"),
+    foto_url: pegar(x,"FOTO_URL")
+  };
+}
+
+function normalizarUsuarioRuntime(row) {
+  return row || null;
+}
+
+router.get("/usuarios-legado/auth/buscar", async (req, res) => {
+  try {
+    const identificador = String(req.query.identificador || "").trim().toLowerCase();
+
+    if (!identificador) {
+      return res.status(400).json({ erro: "identificador é obrigatório" });
+    }
+
+    const r = await db.query(
+      `SELECT *
+       FROM usuarios_legado
+       WHERE LOWER(COALESCE(email,''))=$1
+          OR LOWER(COALESCE(login,''))=$1
+       LIMIT 1`,
+      [identificador]
+    );
+
+    if (!r.rows.length) {
+      return res.status(404).json({ erro: "Usuário não encontrado" });
+    }
+
+    res.json({ usuario: normalizarUsuarioRuntime(r.rows[0]) });
+
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ erro: "Erro ao buscar usuário para autenticação" });
+  }
+});
+
+router.get("/usuarios-legado/:usuarioId", async (req, res) => {
+  try {
+    const usuarioId = String(req.params.usuarioId || "").trim();
+
+    const r = await db.query(
+      `SELECT *
+       FROM usuarios_legado
+       WHERE usuario_id=$1
+       LIMIT 1`,
+      [usuarioId]
+    );
+
+    if (!r.rows.length) {
+      return res.status(404).json({ erro: "Usuário não encontrado" });
+    }
+
+    res.json({ usuario: normalizarUsuarioRuntime(r.rows[0]) });
+
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ erro: "Erro ao buscar usuário" });
+  }
+});
+
+router.post("/usuarios-legado", async (req, res) => {
+  try {
+    const dados = mapearUsuarioLegadoRuntime(req.body || {});
+
+    if (!dados.nome || !dados.email || !dados.login) {
+      return res.status(400).json({
+        erro: "NOME, EMAIL e LOGIN são obrigatórios"
+      });
+    }
+
+    const duplicado = await db.query(
+      `SELECT usuario_id
+       FROM usuarios_legado
+       WHERE LOWER(COALESCE(email,''))=LOWER($1)
+          OR LOWER(COALESCE(login,''))=LOWER($2)
+       LIMIT 1`,
+      [dados.email, dados.login]
+    );
+
+    if (duplicado.rows.length) {
+      return res.status(409).json({
+        erro: "Já existe usuário com este e-mail ou login"
+      });
+    }
+
+    const colunas = CAMPOS_USUARIO_LEGADO_RUNTIME;
+    const valores = colunas.map(c => dados[c]);
+    const placeholders = valores.map((_, i) => `$${i + 1}`);
+
+    const sql = `
+      WITH trava AS (
+        SELECT pg_advisory_xact_lock(hashtext('avante_usuarios_legado_id'))
+      ),
+      proximo AS (
+        SELECT
+          'USR' ||
+          LPAD(
+            (
+              COALESCE(
+                MAX(
+                  CASE
+                    WHEN usuario_id ~ '^USR[0-9]+$'
+                    THEN SUBSTRING(usuario_id FROM 4)::int
+                    ELSE NULL
+                  END
+                ),
+                0
+              ) + 1
+            )::text,
+            6,
+            '0'
+          ) AS usuario_id
+        FROM usuarios_legado, trava
+      )
+      INSERT INTO usuarios_legado
+      (usuario_id, ${colunas.join(",")})
+      SELECT proximo.usuario_id, ${placeholders.join(",")}
+      FROM proximo
+      RETURNING *
+    `;
+
+    const r = await db.query(sql, valores);
+
+    res.status(201).json({
+      sucesso: true,
+      usuario: normalizarUsuarioRuntime(r.rows[0])
+    });
+
+  } catch (e) {
+    console.error(e);
+
+    if (e && e.code === "23505") {
+      return res.status(409).json({
+        erro: "Já existe usuário com este e-mail ou login"
+      });
+    }
+
+    res.status(500).json({ erro: "Erro ao criar usuário" });
+  }
+});
+
+async function atualizarUsuarioLegadoRuntime(req, res) {
+  try {
+    const usuarioId = String(req.params.usuarioId || "").trim();
+
+    if (!usuarioId) {
+      return res.status(400).json({ erro: "usuarioId é obrigatório" });
+    }
+
+    const atual = await db.query(
+      `SELECT *
+       FROM usuarios_legado
+       WHERE usuario_id=$1
+       LIMIT 1`,
+      [usuarioId]
+    );
+
+    if (!atual.rows.length) {
+      return res.status(404).json({ erro: "Usuário não encontrado" });
+    }
+
+    const dados = mapearUsuarioLegadoRuntime(req.body || {});
+    const sets = [];
+    const valores = [];
+
+    CAMPOS_USUARIO_LEGADO_RUNTIME.forEach(campo => {
+      const entradaDireta =
+        Object.prototype.hasOwnProperty.call(req.body || {}, campo) ||
+        Object.prototype.hasOwnProperty.call(req.body || {}, campo.toUpperCase());
+
+      if (!entradaDireta) return;
+
+      valores.push(dados[campo]);
+      sets.push(`${campo}=$${valores.length}`);
+    });
+
+    if (!sets.length) {
+      return res.json({
+        sucesso: true,
+        usuario: normalizarUsuarioRuntime(atual.rows[0]),
+        alterado: false
+      });
+    }
+
+    sets.push("data_atualizacao=NOW()");
+    valores.push(usuarioId);
+
+    const r = await db.query(
+      `UPDATE usuarios_legado
+       SET ${sets.join(", ")}
+       WHERE usuario_id=$${valores.length}
+       RETURNING *`,
+      valores
+    );
+
+    res.json({
+      sucesso: true,
+      usuario: normalizarUsuarioRuntime(r.rows[0]),
+      alterado: true
+    });
+
+  } catch (e) {
+    console.error(e);
+
+    if (e && e.code === "23505") {
+      return res.status(409).json({
+        erro: "E-mail ou login já utilizado por outro usuário"
+      });
+    }
+
+    res.status(500).json({ erro: "Erro ao atualizar usuário" });
+  }
+}
+
+router.put("/usuarios-legado/:usuarioId", atualizarUsuarioLegadoRuntime);
+router.patch("/usuarios-legado/:usuarioId", atualizarUsuarioLegadoRuntime);
+
+
+router.delete("/usuarios-legado/:usuarioId", async (req, res) => {
+  try {
+    const usuarioId = String(req.params.usuarioId || "").trim();
+
+    if (!usuarioId) {
+      return res.status(400).json({ erro: "usuarioId é obrigatório" });
+    }
+
+    const r = await db.query(
+      `DELETE FROM usuarios_legado
+       WHERE usuario_id=$1
+       RETURNING usuario_id`,
+      [usuarioId]
+    );
+
+    if (!r.rows.length) {
+      return res.status(404).json({ erro: "Usuário não encontrado" });
+    }
+
+    res.json({
+      sucesso: true,
+      excluido: true,
+      usuario_id: r.rows[0].usuario_id
+    });
+
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ erro: "Erro ao excluir usuário" });
+  }
+});
+
+
+// ======================================================
 // IMPORTAR LOGS
 // ======================================================
 
