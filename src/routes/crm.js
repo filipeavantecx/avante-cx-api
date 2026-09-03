@@ -819,9 +819,18 @@ router.post("/crm-jornada/metas", async (req, res) => {
       valorAtual
     );
 
+    const seq = await db.query(
+      `SELECT nextval(pg_get_serial_sequence('metas','id'))::bigint AS id`
+    );
+
+    const idNumerico = Number(seq.rows[0].id);
+    const metaId = novoId("MET", idNumerico);
+
     const r = await db.query(
       `INSERT INTO metas
        (
+         id,
+         meta_id,
          cliente_id,
          categoria,
          meta,
@@ -836,9 +845,11 @@ router.post("/crm-jornada/metas", async (req, res) => {
          observacoes
        )
        VALUES
-       ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        RETURNING *`,
       [
+        idNumerico,
+        metaId,
         clienteId,
         vazioNull(d.CATEGORIA ?? d.categoria),
         titulo,
@@ -858,21 +869,7 @@ router.post("/crm-jornada/metas", async (req, res) => {
       ]
     );
 
-    let row = r.rows[0];
-
-    if (!row.meta_id) {
-      const metaId = novoId("MET", row.id);
-
-      const u = await db.query(
-        `UPDATE metas
-         SET meta_id = $1
-         WHERE id = $2
-         RETURNING *`,
-        [metaId, row.id]
-      );
-
-      row = u.rows[0];
-    }
+    const row = r.rows[0];
 
     return res.status(201).json({
       sucesso: true,
@@ -991,9 +988,18 @@ router.post("/crm-jornada/atividades", async (req, res) => {
       return res.status(400).json({ erro: "Título da atividade obrigatório" });
     }
 
+    const seq = await db.query(
+      `SELECT nextval(pg_get_serial_sequence('atividades','id'))::bigint AS id`
+    );
+
+    const idNumerico = Number(seq.rows[0].id);
+    const atividadeId = novoId("ATI", idNumerico);
+
     const r = await db.query(
       `INSERT INTO atividades
        (
+         id,
+         atividade_id,
          cliente_id,
          mentor_id,
          descricao,
@@ -1004,9 +1010,11 @@ router.post("/crm-jornada/atividades", async (req, res) => {
          status,
          observacoes
        )
-       VALUES ($1,$2,$3,$4,NOW(),$5,$6,$7,$8)
+       VALUES ($1,$2,$3,$4,$5,$6,NOW(),$7,$8,$9,$10)
        RETURNING *`,
       [
+        idNumerico,
+        atividadeId,
         clienteId,
         vazioNull(d.RESPONSAVEL ?? d.mentor_id),
         titulo,
@@ -1018,21 +1026,7 @@ router.post("/crm-jornada/atividades", async (req, res) => {
       ]
     );
 
-    let row = r.rows[0];
-
-    if (!row.atividade_id) {
-      const atividadeId = novoId("ATI", row.id);
-
-      const u = await db.query(
-        `UPDATE atividades
-         SET atividade_id = $1
-         WHERE id = $2
-         RETURNING *`,
-        [atividadeId, row.id]
-      );
-
-      row = u.rows[0];
-    }
+    const row = r.rows[0];
 
     return res.status(201).json({
       sucesso: true,
@@ -1119,9 +1113,18 @@ router.post("/crm-jornada/sessoes", async (req, res) => {
       return res.status(400).json({ erro: "CLIENTE_ID inválido" });
     }
 
+    const seq = await db.query(
+      `SELECT nextval(pg_get_serial_sequence('sessoes','id'))::bigint AS id`
+    );
+
+    const idNumerico = Number(seq.rows[0].id);
+    const sessaoId = novoId("SES", idNumerico);
+
     const r = await db.query(
       `INSERT INTO sessoes
        (
+         id,
+         sessao_id,
          cliente_id,
          mentor_id,
          data,
@@ -1133,9 +1136,11 @@ router.post("/crm-jornada/sessoes", async (req, res) => {
          status,
          observacoes
        )
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
        RETURNING *`,
       [
+        idNumerico,
+        sessaoId,
         clienteId,
         vazioNull(d.MENTOR_CONSULTOR ?? d.mentor_id),
         vazioNull(d.DATA ?? d.data) || new Date(),
@@ -1149,21 +1154,7 @@ router.post("/crm-jornada/sessoes", async (req, res) => {
       ]
     );
 
-    let row = r.rows[0];
-
-    if (!row.sessao_id) {
-      const sessaoId = novoId("SES", row.id);
-
-      const u = await db.query(
-        `UPDATE sessoes
-         SET sessao_id = $1
-         WHERE id = $2
-         RETURNING *`,
-        [sessaoId, row.id]
-      );
-
-      row = u.rows[0];
-    }
+    const row = r.rows[0];
 
     /*
      * Atualiza próxima sessão no cliente quando a coluna existe.
