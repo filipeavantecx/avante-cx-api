@@ -12,6 +12,7 @@ const relacionamentoRoutes =
   require("./src/routes/relacionamento");
 const administrativoRoutes =
   require("./src/routes/administrativo");
+const agendaWebRoutes = require("./src/routes/agendaWeb");
 
 const db = require("./src/database/db");
 
@@ -63,6 +64,9 @@ app.use("/auth", authRoutes);
 // ROTAS PROTEGIDAS
 app.use("/clientes", clientesRoutes);
 app.use("/contratos", contratosRoutes);
+
+// AGENDA WEB CRM - antes dos routers genéricos
+app.use("/crm-agenda", agendaWebRoutes);
 
 // CRM
 app.use("/", crmRoutes);
