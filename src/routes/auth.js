@@ -283,6 +283,228 @@ router.get("/crm-me", verificarTokenCrm, async (req, res) => {
   }
 });
 
+
+/* ============================================================
+   DASHBOARD CRM - Node/PostgreSQL
+   Usa o mesmo JWT CRM do /crm-login.
+   ============================================================ */
+
+router.get("/crm-dashboard", verificarTokenCrm, async (req, res) => {
+  try {
+    const usuarioResultado = await db.query(
+      `SELECT *
+       FROM usuarios_legado
+       WHERE usuario_id = $1
+       LIMIT 1`,
+      [req.usuarioCrm.id]
+    );
+
+    if (!usuarioResultado.rows.length) {
+      return res.status(401).json({
+        erro: "Usuário não encontrado."
+      });
+    }
+
+    const usuario = usuarioResultado.rows[0];
+    const publico = montarUsuarioPublico(usuario);
+
+    if (!publico.permissoes?.PODE_DASHBOARD) {
+      return res.status(403).json({
+        erro: "Você não possui permissão para acessar o Dashboard."
+      });
+    }
+
+    async function seguro(sql, params, fallback) {
+      try {
+        const r = await db.query(sql, params || []);
+        return r.rows;
+      } catch (erro) {
+        console.warn(
+          "Dashboard - consulta ignorada:",
+          erro?.message || erro
+        );
+        return fallback || [];
+      }
+    }
+
+    const clientes = await seguro(
+      `SELECT * FROM clientes`,
+      [],
+      []
+    );
+
+    const leads = await seguro(
+      `SELECT * FROM leads`,
+      [],
+      []
+    );
+
+    const oportunidades = await seguro(
+      `SELECT * FROM oportunidades`,
+      [],
+      []
+    );
+
+    const receber = await seguro(
+      `SELECT * FROM contas_receber`,
+      [],
+      []
+    );
+
+    const agenda = await seguro(
+      `SELECT *
+       FROM agenda
+       ORDER BY data ASC NULLS LAST, hora_inicio ASC NULLS LAST
+       LIMIT 5`,
+      [],
+      []
+    );
+
+    const clientesPorStatus = {};
+
+    clientes.forEach((c) => {
+      const status =
+        String(
+          c.status_cliente ||
+          c.status ||
+          "SEM_STATUS"
+        )
+          .trim()
+          .toUpperCase() ||
+        "SEM_STATUS";
+
+      clientesPorStatus[status] =
+        (clientesPorStatus[status] || 0) + 1;
+    });
+
+    const clientesAtivos =
+      clientes.filter((c) => {
+        if (c.ativo !== undefined && c.ativo !== null) {
+          return boolSistema(c.ativo);
+        }
+
+        const status =
+          String(
+            c.status_cliente ||
+            c.status ||
+            ""
+          )
+            .trim()
+            .toUpperCase();
+
+        return status === "ATIVO";
+      }).length;
+
+    const vendas =
+      oportunidades.filter((o) => {
+        const status =
+          String(o.status || "")
+            .trim()
+            .toUpperCase();
+
+        return [
+          "GANHO",
+          "GANHA",
+          "FECHADO",
+          "FECHADA",
+          "VENDIDO",
+          "VENDA"
+        ].includes(status);
+      }).length;
+
+    const receitaRecebida =
+      receber.reduce((soma, conta) => {
+        const valor =
+          Number(
+            conta.valor_pago ??
+            conta.valor_recebido ??
+            conta.inter_valor_recebido ??
+            0
+          );
+
+        return soma +
+          (Number.isFinite(valor) ? valor : 0);
+      }, 0);
+
+    const proximosEventos =
+      agenda.map((evento) => ({
+        AGENDA_ID:
+          evento.agenda_id ||
+          evento.id ||
+          "",
+        TITULO:
+          evento.titulo ||
+          evento.nome ||
+          "Compromisso",
+        DATA:
+          evento.data ||
+          evento.data_evento ||
+          "",
+        HORA_INICIO:
+          evento.hora_inicio ||
+          evento.horario ||
+          "",
+        HORA_FIM:
+          evento.hora_fim ||
+          "",
+        LOCAL:
+          evento.local ||
+          evento.local_evento ||
+          "",
+        STATUS:
+          evento.status ||
+          "AGENDADO"
+      }));
+
+    res.json({
+      sucesso: true,
+      fonte: "API_POSTGRESQL",
+      dashboard: {
+        empresa: "AVANTE",
+        sistema: "AVANTE CX",
+        versao: "2.0.0",
+        resumo: {
+          clientes: clientes.length,
+          clientesAtivos,
+          leads: leads.length,
+          vendas,
+          receitaRecebida
+        },
+        clientesPorStatus,
+        leadsPorEtapa: {},
+        oportunidadesPorStatus: {},
+        fraseDoDia: {
+          data:
+            new Intl.DateTimeFormat(
+              "pt-BR",
+              {
+                timeZone: "America/Bahia"
+              }
+            ).format(new Date())
+        },
+        proximosCompromissos: proximosEventos,
+        proximosEventos,
+        agenda: {
+          eventos: proximosEventos
+        },
+        usuario: {
+          nome: publico.nome,
+          email: publico.email,
+          perfil: publico.perfil
+        },
+        atualizadoEm: new Date().toISOString()
+      }
+    });
+
+  } catch (erro) {
+    console.error(erro);
+
+    res.status(500).json({
+      erro: "Erro ao carregar Dashboard."
+    });
+  }
+});
+
 /* ROTAS TÉCNICAS EXISTENTES - preservadas */
 router.post("/login", async (req, res) => {
   try {
