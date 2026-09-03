@@ -1,12 +1,133 @@
 const express = require("express");
 const db = require("../database/db");
 const verificarToken = require("../middleware/auth");
+const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 
 const router = express.Router();
 
-// Todas as rotas abaixo exigem autenticação
-router.use(verificarToken);
+// Todas as rotas abaixo exigem autenticação.
+// Aceita o token técnico antigo e o novo JWT CRM.
+function segredoCrmJwtClientes_() {
+  const dedicado = String(process.env.CRM_JWT_SECRET || "").trim();
+  if (dedicado) return dedicado;
 
+  const base = String(process.env.JWT_SECRET || "").trim();
+  if (!base) throw new Error("JWT_SECRET não configurado no Railway");
+
+  return crypto
+    .createHmac("sha256", base)
+    .update("AVANTE_CRM_WEB_V1", "utf8")
+    .digest("hex");
+}
+
+function boolPermissaoCliente_(valor, padrao) {
+  if (valor === undefined || valor === null || valor === "") {
+    return !!padrao;
+  }
+
+  if (valor === true || valor === 1) return true;
+
+  return ["TRUE", "1", "SIM", "S", "YES", "Y"]
+    .includes(String(valor).trim().toUpperCase());
+}
+
+function perfilPodeClientes_(perfil) {
+  return [
+    "ADMINISTRADOR",
+    "GESTOR",
+    "MENTOR",
+    "COLABORADOR",
+    "VISUALIZADOR"
+  ].includes(String(perfil || "").trim().toUpperCase());
+}
+
+async function verificarTokenClientesHibrido_(req, res, next) {
+  try {
+    const cabecalho = String(req.headers.authorization || "");
+    const token = cabecalho.startsWith("Bearer ")
+      ? cabecalho.slice(7).trim()
+      : "";
+
+    if (!token) {
+      return res.status(401).json({
+        autenticado: false,
+        erro: "Sessão não informada"
+      });
+    }
+
+    const decodificado = jwt.decode(token) || {};
+
+    if (decodificado.tipo === "crm") {
+      const payload = jwt.verify(
+        token,
+        segredoCrmJwtClientes_(),
+        {
+          issuer: "avante-cx",
+          audience: "avante-cx-web"
+        }
+      );
+
+      const resultado = await db.query(
+        `SELECT usuario_id, nome, email, login, perfil, status, pode_clientes
+         FROM usuarios_legado
+         WHERE usuario_id = $1
+         LIMIT 1`,
+        [payload.id]
+      );
+
+      if (!resultado.rows.length) {
+        return res.status(401).json({
+          autenticado: false,
+          erro: "Usuário não encontrado"
+        });
+      }
+
+      const usuario = resultado.rows[0];
+
+      if (String(usuario.status || "").trim().toUpperCase() !== "ATIVO") {
+        return res.status(403).json({
+          autenticado: false,
+          erro: "Usuário inativo"
+        });
+      }
+
+      const permitido = boolPermissaoCliente_(
+        usuario.pode_clientes,
+        perfilPodeClientes_(usuario.perfil)
+      );
+
+      if (!permitido) {
+        return res.status(403).json({
+          erro: "Você não possui permissão para acessar Clientes."
+        });
+      }
+
+      req.usuario = {
+        id: null,
+        idLegado: usuario.usuario_id,
+        nome: usuario.nome || "",
+        email: usuario.email || "",
+        login: usuario.login || "",
+        perfil: usuario.perfil || "",
+        tipo: "crm"
+      };
+
+      return next();
+    }
+
+    return verificarToken(req, res, next);
+
+  } catch (erro) {
+    return res.status(401).json({
+      autenticado: false,
+      expirada: erro?.name === "TokenExpiredError",
+      erro: "Sessão inválida ou expirada"
+    });
+  }
+}
+
+router.use(verificarTokenClientesHibrido_);
 
 // ======================================================
 // HELPERS
@@ -403,7 +524,8 @@ router.post("/importar", async (req, res) => {
           await atualizarClienteNoBanco({
             id: existente.id,
             dados,
-            usuarioId: req.usuario.id
+            usuarioId: usuarioAuditoriaId_(req),
+      usuarioTexto: usuarioAuditoriaTexto_(req)
           });
 
           atualizados++;
@@ -412,7 +534,7 @@ router.post("/importar", async (req, res) => {
 
         await inserirClienteNoBanco({
           dados,
-          usuarioId: req.usuario.id
+          usuarioId: usuarioAuditoriaId_(req)
         });
 
         inseridos++;
@@ -497,7 +619,7 @@ router.post("/", async (req, res) => {
 
     const cliente = await inserirClienteNoBanco({
       dados,
-      usuarioId: req.usuario.id
+      usuarioId: usuarioAuditoriaId_(req)
     });
 
     res.status(201).json({
@@ -628,7 +750,8 @@ router.put("/:id", async (req, res) => {
     const cliente = await atualizarClienteNoBanco({
       id: idInterno,
       dados,
-      usuarioId: req.usuario.id
+      usuarioId: usuarioAuditoriaId_(req),
+      usuarioTexto: usuarioAuditoriaTexto_(req)
     });
 
     res.json({
@@ -934,7 +1057,7 @@ async function inserirClienteNoBanco({ dados, usuarioId }) {
 }
 
 
-async function atualizarClienteNoBanco({ id, dados, usuarioId }) {
+async function atualizarClienteNoBanco({ id, dados, usuarioId, usuarioTexto }) {
   const resultado = await db.query(
     `
       UPDATE clientes
@@ -1027,7 +1150,7 @@ async function atualizarClienteNoBanco({ id, dados, usuarioId }) {
       dados.ultima_interacao,
       dados.proxima_sessao,
       dados.data_atualizacao,
-      dados.usuario_atualizacao || `usuario:${usuarioId}`,
+      dados.usuario_atualizacao || usuarioTexto || (usuarioId ? `usuario:${usuarioId}` : "SISTEMA"),
       dados.ativo,
       dados.observacoes,
       dados.cep,
