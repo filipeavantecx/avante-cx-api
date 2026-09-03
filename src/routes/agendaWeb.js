@@ -132,6 +132,385 @@ async function verificarTokenCrmAgenda_(req, res, next) {
 
 router.use(verificarTokenCrmAgenda_);
 
+
+// ======================================================
+// GOOGLE CALENDAR - REST NATIVO (SEM googleapis)
+// Railway env:
+// GOOGLE_SERVICE_ACCOUNT_EMAIL
+// GOOGLE_PRIVATE_KEY
+// GOOGLE_CALENDAR_ID
+// GOOGLE_CALENDAR_TIMEZONE (opcional, padrão America/Bahia)
+// ======================================================
+
+function googleCalendarConfig_() {
+  return {
+    email: String(process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || "").trim(),
+    privateKey: String(process.env.GOOGLE_PRIVATE_KEY || "")
+      .replace(/\\n/g, "\n")
+      .trim(),
+    calendarId: String(process.env.GOOGLE_CALENDAR_ID || "").trim(),
+    timeZone:
+      String(process.env.GOOGLE_CALENDAR_TIMEZONE || "").trim() ||
+      "America/Bahia"
+  };
+}
+
+function base64Url_(valor) {
+  return Buffer
+    .from(valor)
+    .toString("base64")
+    .replace(/=/g, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
+}
+
+async function googleAccessToken_() {
+  const cfg = googleCalendarConfig_();
+
+  if (!cfg.email || !cfg.privateKey || !cfg.calendarId) {
+    throw new Error(
+      "Google Calendar não configurado no Railway."
+    );
+  }
+
+  const agora = Math.floor(Date.now() / 1000);
+
+  const header = {
+    alg: "RS256",
+    typ: "JWT"
+  };
+
+  const claim = {
+    iss: cfg.email,
+    scope: "https://www.googleapis.com/auth/calendar",
+    aud: "https://oauth2.googleapis.com/token",
+    iat: agora,
+    exp: agora + 3600
+  };
+
+  const parte1 = base64Url_(JSON.stringify(header));
+  const parte2 = base64Url_(JSON.stringify(claim));
+  const unsigned = `${parte1}.${parte2}`;
+
+  const assinatura = crypto.sign(
+    "RSA-SHA256",
+    Buffer.from(unsigned),
+    cfg.privateKey
+  );
+
+  const assertion =
+    `${unsigned}.${base64Url_(assinatura)}`;
+
+  const resposta = await fetch(
+    "https://oauth2.googleapis.com/token",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type":
+          "application/x-www-form-urlencoded"
+      },
+      body:
+        "grant_type=" +
+        encodeURIComponent(
+          "urn:ietf:params:oauth:grant-type:jwt-bearer"
+        ) +
+        "&assertion=" +
+        encodeURIComponent(assertion)
+    }
+  );
+
+  const dados = await resposta.json().catch(() => ({}));
+
+  if (!resposta.ok || !dados.access_token) {
+    throw new Error(
+      dados.error_description ||
+      dados.error ||
+      "Falha ao autenticar no Google Calendar."
+    );
+  }
+
+  return dados.access_token;
+}
+
+function googleDataHora_(data, hora) {
+  const d = String(data || "").slice(0, 10);
+  const h = String(hora || "00:00").slice(0, 5);
+  return `${d}T${h}:00`;
+}
+
+function googleEventoBody_(d) {
+  const cfg = googleCalendarConfig_();
+
+  const convidados =
+    String(pegar(d, "CONVIDADOS") || "")
+      .split(/[;,]/)
+      .map(x => x.trim())
+      .filter(Boolean)
+      .filter(x => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x))
+      .map(email => ({ email }));
+
+  const inicio =
+    googleDataHora_(
+      pegar(d, "DATA"),
+      pegar(d, "HORA_INICIO") || "09:00"
+    );
+
+  let fimHora =
+    pegar(d, "HORA_FIM") ||
+    pegar(d, "HORA_INICIO") ||
+    "10:00";
+
+  if (
+    String(fimHora) ===
+    String(pegar(d, "HORA_INICIO") || "")
+  ) {
+    const [hh, mm] =
+      String(fimHora || "09:00")
+        .split(":")
+        .map(Number);
+
+    const minutos =
+      (hh * 60 + mm + 60) % (24 * 60);
+
+    fimHora =
+      String(Math.floor(minutos / 60)).padStart(2, "0") +
+      ":" +
+      String(minutos % 60).padStart(2, "0");
+  }
+
+  const fim =
+    googleDataHora_(
+      pegar(d, "DATA"),
+      fimHora
+    );
+
+  return {
+    summary:
+      pegar(d, "TITULO") ||
+      "Compromisso AVANTE CX",
+    location:
+      pegar(d, "LOCAL") ||
+      undefined,
+    description:
+      pegar(d, "DESCRICAO") ||
+      undefined,
+    start: {
+      dateTime: inicio,
+      timeZone: cfg.timeZone
+    },
+    end: {
+      dateTime: fim,
+      timeZone: cfg.timeZone
+    },
+    attendees:
+      convidados.length
+        ? convidados
+        : undefined
+  };
+}
+
+async function googleCalendarRequest_(metodo, caminho, body) {
+  const cfg = googleCalendarConfig_();
+  const token = await googleAccessToken_();
+
+  const url =
+    "https://www.googleapis.com/calendar/v3/calendars/" +
+    encodeURIComponent(cfg.calendarId) +
+    caminho;
+
+  const resposta = await fetch(
+    url,
+    {
+      method: metodo,
+      headers: {
+        "Authorization": "Bearer " + token,
+        "Content-Type": "application/json"
+      },
+      body:
+        body === undefined
+          ? undefined
+          : JSON.stringify(body)
+    }
+  );
+
+  let dados = {};
+
+  if (resposta.status !== 204) {
+    dados =
+      await resposta
+        .json()
+        .catch(() => ({}));
+  }
+
+  if (!resposta.ok) {
+    throw new Error(
+      dados?.error?.message ||
+      "Falha no Google Calendar."
+    );
+  }
+
+  return dados;
+}
+
+async function criarEventoGoogleNode_(d) {
+  return googleCalendarRequest_(
+    "POST",
+    "/events?sendUpdates=all",
+    googleEventoBody_(d)
+  );
+}
+
+async function atualizarEventoGoogleNode_(eventId, d) {
+  return googleCalendarRequest_(
+    "PATCH",
+    "/events/" +
+      encodeURIComponent(eventId) +
+      "?sendUpdates=all",
+    googleEventoBody_(d)
+  );
+}
+
+async function removerEventoGoogleNode_(eventId) {
+  return googleCalendarRequest_(
+    "DELETE",
+    "/events/" +
+      encodeURIComponent(eventId) +
+      "?sendUpdates=all"
+  );
+}
+
+
+// ======================================================
+// DIAGNÓSTICO TEMPORÁRIO DE JWT CRM - REMOVER APÓS TESTE
+// Não expõe o token nem segredos.
+// ======================================================
+router.get("/debug-token", async (req, res) => {
+  try {
+    const cabecalho = String(req.headers.authorization || "");
+    const token = cabecalho.startsWith("Bearer ")
+      ? cabecalho.slice(7).trim()
+      : "";
+
+    if (!token) {
+      return res.status(401).json({
+        sucesso: false,
+        etapa: "cabecalho",
+        tokenRecebido: false,
+        erro: "Authorization Bearer não recebido"
+      });
+    }
+
+    const partes = token.split(".");
+    let payloadSemValidar = null;
+
+    try {
+      payloadSemValidar = jwt.decode(token) || null;
+    } catch (e) {}
+
+    let payloadValidado = null;
+    let erroValidacao = null;
+
+    try {
+      payloadValidado = jwt.verify(
+        token,
+        segredoCrmJwtAgenda_(),
+        {
+          issuer: "avante-cx",
+          audience: "avante-cx-web"
+        }
+      );
+    } catch (erro) {
+      erroValidacao = {
+        nome: erro?.name || "",
+        mensagem: erro?.message || ""
+      };
+    }
+
+    return res
+      .status(payloadValidado ? 200 : 401)
+      .json({
+        sucesso: !!payloadValidado,
+        tokenRecebido: true,
+        partesJwt: partes.length,
+        jwtFormatoValido: partes.length === 3,
+        segredoCrmDedicadoConfigurado:
+          !!String(process.env.CRM_JWT_SECRET || "").trim(),
+        jwtSecretBaseConfigurado:
+          !!String(process.env.JWT_SECRET || "").trim(),
+        decode: payloadSemValidar
+          ? {
+              tipo: payloadSemValidar.tipo || null,
+              id: payloadSemValidar.id || null,
+              issuer: payloadSemValidar.iss || null,
+              audience: payloadSemValidar.aud || null,
+              exp: payloadSemValidar.exp || null,
+              iat: payloadSemValidar.iat || null
+            }
+          : null,
+        validado: payloadValidado
+          ? {
+              tipo: payloadValidado.tipo || null,
+              id: payloadValidado.id || null,
+              issuer: payloadValidado.iss || null,
+              audience: payloadValidado.aud || null,
+              exp: payloadValidado.exp || null,
+              iat: payloadValidado.iat || null
+            }
+          : null,
+        erroValidacao
+      });
+
+  } catch (erro) {
+    return res.status(500).json({
+      sucesso: false,
+      etapa: "debug-token",
+      erro: erro?.message || "Erro interno"
+    });
+  }
+});
+
+
+router.get("/google-status", async (req, res) => {
+  try {
+    const cfg = googleCalendarConfig_();
+
+    if (!cfg.email || !cfg.privateKey || !cfg.calendarId) {
+      return res.json({
+        sucesso: true,
+        conectado: false,
+        configurado: false,
+        mensagem:
+          "Google Calendar ainda não configurado no Railway."
+      });
+    }
+
+    await googleCalendarRequest_(
+      "GET",
+      "?maxResults=1"
+    );
+
+    return res.json({
+      sucesso: true,
+      conectado: true,
+      configurado: true,
+      calendarId: cfg.calendarId,
+      mensagem:
+        "Google Calendar conectado ao AVANTE CX."
+    });
+
+  } catch (erro) {
+    return res.status(502).json({
+      sucesso: false,
+      conectado: false,
+      configurado: true,
+      erro:
+        erro?.message ||
+        "Falha ao conectar Google Calendar."
+    });
+  }
+});
+
+
 function agendaDtoWeb_(row = {}) {
   return {
     AGENDA_ID: row.agenda_id || "",
@@ -296,11 +675,52 @@ router.post("/", async (req, res) => {
       ]
     );
 
+    let row = r.rows[0];
+    let sincronizadoGoogle = false;
+    let avisoGoogle = "";
+
+    try {
+      const google =
+        await criarEventoGoogleNode_(d);
+
+      const atualizado =
+        await db.query(
+          `UPDATE agenda
+           SET google_event_id=$1,
+               calendar_id=$2,
+               data_atualizacao=NOW()
+           WHERE id=$3
+           RETURNING *`,
+          [
+            google.id || null,
+            googleCalendarConfig_().calendarId,
+            row.id
+          ]
+        );
+
+      row = atualizado.rows[0] || row;
+      sincronizadoGoogle = !!google.id;
+
+    } catch (erroGoogle) {
+      avisoGoogle =
+        erroGoogle?.message ||
+        "Compromisso salvo, mas não sincronizado com Google Calendar.";
+
+      console.warn(
+        "Agenda salva sem sincronização Google:",
+        avisoGoogle
+      );
+    }
+
     return res.status(201).json({
       sucesso: true,
-      mensagem: "Compromisso salvo no AVANTE CX.",
-      sincronizadoGoogle: false,
-      evento: agendaDtoWeb_(r.rows[0])
+      mensagem:
+        sincronizadoGoogle
+          ? "Compromisso salvo no AVANTE CX e sincronizado com Google Calendar."
+          : "Compromisso salvo no AVANTE CX.",
+      sincronizadoGoogle,
+      avisoGoogle,
+      evento: agendaDtoWeb_(row)
     });
 
   } catch (erro) {
@@ -363,11 +783,85 @@ router.put("/:id", async (req, res) => {
       ]
     );
 
+    const row = r.rows[0];
+    let sincronizadoGoogle = false;
+    let avisoGoogle = "";
+
+    try {
+      if (row.google_event_id) {
+        await atualizarEventoGoogleNode_(
+          row.google_event_id,
+          {
+            TITULO: row.titulo,
+            TIPO_EVENTO: row.tipo_evento,
+            ID_CLIENTE: row.id_cliente,
+            ID_FUNCIONARIO: row.id_funcionario,
+            DATA: row.data,
+            HORA_INICIO: row.hora_inicio,
+            HORA_FIM: row.hora_fim,
+            LOCAL: row.local,
+            DESCRICAO: row.descricao,
+            CONVIDADOS: row.convidados
+          }
+        );
+
+        sincronizadoGoogle = true;
+      } else {
+        const google =
+          await criarEventoGoogleNode_({
+            TITULO: row.titulo,
+            TIPO_EVENTO: row.tipo_evento,
+            ID_CLIENTE: row.id_cliente,
+            ID_FUNCIONARIO: row.id_funcionario,
+            DATA: row.data,
+            HORA_INICIO: row.hora_inicio,
+            HORA_FIM: row.hora_fim,
+            LOCAL: row.local,
+            DESCRICAO: row.descricao,
+            CONVIDADOS: row.convidados
+          });
+
+        if (google.id) {
+          await db.query(
+            `UPDATE agenda
+             SET google_event_id=$1,
+                 calendar_id=$2,
+                 data_atualizacao=NOW()
+             WHERE id=$3`,
+            [
+              google.id,
+              googleCalendarConfig_().calendarId,
+              row.id
+            ]
+          );
+
+          row.google_event_id = google.id;
+          row.calendar_id =
+            googleCalendarConfig_().calendarId;
+
+          sincronizadoGoogle = true;
+        }
+      }
+    } catch (erroGoogle) {
+      avisoGoogle =
+        erroGoogle?.message ||
+        "Evento atualizado no CRM, mas não no Google Calendar.";
+
+      console.warn(
+        "Atualização Google Agenda falhou:",
+        avisoGoogle
+      );
+    }
+
     return res.json({
       sucesso: true,
-      mensagem: "Compromisso atualizado no AVANTE CX.",
-      sincronizadoGoogle: false,
-      evento: agendaDtoWeb_(r.rows[0])
+      mensagem:
+        sincronizadoGoogle
+          ? "Compromisso atualizado no AVANTE CX e no Google Calendar."
+          : "Compromisso atualizado no AVANTE CX.",
+      sincronizadoGoogle,
+      avisoGoogle,
+      evento: agendaDtoWeb_(row)
     });
 
   } catch (erro) {
@@ -403,11 +897,38 @@ router.patch("/:id/cancelar", async (req, res) => {
       [atual.id]
     );
 
+    const row = r.rows[0];
+    let removidoGoogle = false;
+    let avisoGoogle = "";
+
+    try {
+      if (row.google_event_id) {
+        await removerEventoGoogleNode_(
+          row.google_event_id
+        );
+
+        removidoGoogle = true;
+      }
+    } catch (erroGoogle) {
+      avisoGoogle =
+        erroGoogle?.message ||
+        "Compromisso cancelado no CRM, mas não removido do Google Calendar.";
+
+      console.warn(
+        "Cancelamento Google Agenda falhou:",
+        avisoGoogle
+      );
+    }
+
     return res.json({
       sucesso: true,
-      mensagem: "Compromisso cancelado no AVANTE CX.",
-      removidoGoogle: false,
-      evento: agendaDtoWeb_(r.rows[0])
+      mensagem:
+        removidoGoogle
+          ? "Compromisso cancelado no AVANTE CX e removido do Google Calendar."
+          : "Compromisso cancelado no AVANTE CX.",
+      removidoGoogle,
+      avisoGoogle,
+      evento: agendaDtoWeb_(row)
     });
 
   } catch (erro) {
