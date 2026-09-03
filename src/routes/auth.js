@@ -291,6 +291,12 @@ router.get("/crm-me", verificarTokenCrm, async (req, res) => {
 
 router.get("/crm-dashboard", verificarTokenCrm, async (req, res) => {
   try {
+    /*
+     * Evita qualquer consulta travada segurar o Dashboard.
+     * 5 segundos por statement nesta rota.
+     */
+    await db.query(`SET statement_timeout = '5000ms'`);
+
     const usuarioResultado = await db.query(
       `SELECT *
        FROM usuarios_legado
@@ -314,149 +320,124 @@ router.get("/crm-dashboard", verificarTokenCrm, async (req, res) => {
       });
     }
 
-    async function seguro(sql, params, fallback) {
+    async function numeroSeguro(sql, params = []) {
       try {
-        const r = await db.query(sql, params || []);
-        return r.rows;
+        const r = await db.query(sql, params);
+        return Number(r.rows?.[0]?.total || 0);
       } catch (erro) {
-        console.warn(
-          "Dashboard - consulta ignorada:",
-          erro?.message || erro
-        );
-        return fallback || [];
+        console.warn("Dashboard count ignorado:", erro?.message || erro);
+        return 0;
       }
     }
 
-    const clientes = await seguro(
-      `SELECT * FROM clientes`,
-      [],
-      []
-    );
+    async function valorSeguro(sql, params = []) {
+      try {
+        const r = await db.query(sql, params);
+        return Number(r.rows?.[0]?.valor || 0);
+      } catch (erro) {
+        console.warn("Dashboard valor ignorado:", erro?.message || erro);
+        return 0;
+      }
+    }
 
-    const leads = await seguro(
-      `SELECT * FROM leads`,
-      [],
-      []
-    );
+    async function linhasSeguro(sql, params = []) {
+      try {
+        const r = await db.query(sql, params);
+        return Array.isArray(r.rows) ? r.rows : [];
+      } catch (erro) {
+        console.warn("Dashboard linhas ignoradas:", erro?.message || erro);
+        return [];
+      }
+    }
 
-    const oportunidades = await seguro(
-      `SELECT * FROM oportunidades`,
-      [],
-      []
-    );
+    /*
+     * Consultas pequenas e paralelas.
+     * Não usamos SELECT * de tabelas inteiras.
+     */
+    const [
+      totalClientes,
+      clientesAtivos,
+      totalLeads,
+      totalVendas,
+      receitaRecebida,
+      statusClientes
+    ] = await Promise.all([
+      numeroSeguro(`SELECT COUNT(*)::int AS total FROM clientes`),
 
-    const receber = await seguro(
-      `SELECT * FROM contas_receber`,
-      [],
-      []
-    );
+      numeroSeguro(
+        `SELECT COUNT(*)::int AS total
+         FROM clientes
+         WHERE
+           COALESCE(ativo, FALSE) = TRUE
+           OR UPPER(COALESCE(status_cliente, status, '')) = 'ATIVO'`
+      ),
 
-    const agenda = await seguro(
-      `SELECT *
-       FROM agenda
-       ORDER BY data ASC NULLS LAST, hora_inicio ASC NULLS LAST
-       LIMIT 5`,
-      [],
-      []
-    );
+      numeroSeguro(`SELECT COUNT(*)::int AS total FROM leads`),
+
+      numeroSeguro(
+        `SELECT COUNT(*)::int AS total
+         FROM oportunidades
+         WHERE UPPER(COALESCE(status, '')) IN
+           ('GANHO','GANHA','FECHADO','FECHADA','VENDIDO','VENDA')`
+      ),
+
+      valorSeguro(
+        `SELECT COALESCE(SUM(
+           COALESCE(
+             valor_pago,
+             valor_recebido,
+             inter_valor_recebido,
+             0
+           )
+         ),0)::numeric AS valor
+         FROM contas_receber`
+      ),
+
+      linhasSeguro(
+        `SELECT
+           UPPER(COALESCE(status_cliente, status, 'SEM_STATUS')) AS status,
+           COUNT(*)::int AS total
+         FROM clientes
+         GROUP BY 1
+         ORDER BY 1`
+      )
+    ]);
 
     const clientesPorStatus = {};
 
-    clientes.forEach((c) => {
-      const status =
-        String(
-          c.status_cliente ||
-          c.status ||
-          "SEM_STATUS"
-        )
-          .trim()
-          .toUpperCase() ||
-        "SEM_STATUS";
-
-      clientesPorStatus[status] =
-        (clientesPorStatus[status] || 0) + 1;
+    statusClientes.forEach((item) => {
+      clientesPorStatus[String(item.status || "SEM_STATUS")] =
+        Number(item.total || 0);
     });
 
-    const clientesAtivos =
-      clientes.filter((c) => {
-        if (c.ativo !== undefined && c.ativo !== null) {
-          return boolSistema(c.ativo);
-        }
+    /*
+     * Agenda fica opcional nesta etapa.
+     * Se a tabela/colunas ainda diferirem, o Dashboard continua carregando.
+     */
+    let proximosEventos = [];
 
-        const status =
-          String(
-            c.status_cliente ||
-            c.status ||
-            ""
-          )
-            .trim()
-            .toUpperCase();
+    try {
+      const agenda = await linhasSeguro(
+        `SELECT *
+         FROM agenda
+         ORDER BY data ASC NULLS LAST
+         LIMIT 5`
+      );
 
-        return status === "ATIVO";
-      }).length;
-
-    const vendas =
-      oportunidades.filter((o) => {
-        const status =
-          String(o.status || "")
-            .trim()
-            .toUpperCase();
-
-        return [
-          "GANHO",
-          "GANHA",
-          "FECHADO",
-          "FECHADA",
-          "VENDIDO",
-          "VENDA"
-        ].includes(status);
-      }).length;
-
-    const receitaRecebida =
-      receber.reduce((soma, conta) => {
-        const valor =
-          Number(
-            conta.valor_pago ??
-            conta.valor_recebido ??
-            conta.inter_valor_recebido ??
-            0
-          );
-
-        return soma +
-          (Number.isFinite(valor) ? valor : 0);
-      }, 0);
-
-    const proximosEventos =
-      agenda.map((evento) => ({
-        AGENDA_ID:
-          evento.agenda_id ||
-          evento.id ||
-          "",
-        TITULO:
-          evento.titulo ||
-          evento.nome ||
-          "Compromisso",
-        DATA:
-          evento.data ||
-          evento.data_evento ||
-          "",
-        HORA_INICIO:
-          evento.hora_inicio ||
-          evento.horario ||
-          "",
-        HORA_FIM:
-          evento.hora_fim ||
-          "",
-        LOCAL:
-          evento.local ||
-          evento.local_evento ||
-          "",
-        STATUS:
-          evento.status ||
-          "AGENDADO"
+      proximosEventos = agenda.map((evento) => ({
+        AGENDA_ID: evento.agenda_id || evento.id || "",
+        TITULO: evento.titulo || evento.nome || "Compromisso",
+        DATA: evento.data || evento.data_evento || "",
+        HORA_INICIO: evento.hora_inicio || evento.horario || "",
+        HORA_FIM: evento.hora_fim || "",
+        LOCAL: evento.local || evento.local_evento || "",
+        STATUS: evento.status || "AGENDADO"
       }));
+    } catch (e) {
+      proximosEventos = [];
+    }
 
-    res.json({
+    return res.json({
       sucesso: true,
       fonte: "API_POSTGRESQL",
       dashboard: {
@@ -464,23 +445,20 @@ router.get("/crm-dashboard", verificarTokenCrm, async (req, res) => {
         sistema: "AVANTE CX",
         versao: "2.0.0",
         resumo: {
-          clientes: clientes.length,
+          clientes: totalClientes,
           clientesAtivos,
-          leads: leads.length,
-          vendas,
+          leads: totalLeads,
+          vendas: totalVendas,
           receitaRecebida
         },
         clientesPorStatus,
         leadsPorEtapa: {},
         oportunidadesPorStatus: {},
         fraseDoDia: {
-          data:
-            new Intl.DateTimeFormat(
-              "pt-BR",
-              {
-                timeZone: "America/Bahia"
-              }
-            ).format(new Date())
+          data: new Intl.DateTimeFormat(
+            "pt-BR",
+            { timeZone: "America/Bahia" }
+          ).format(new Date())
         },
         proximosCompromissos: proximosEventos,
         proximosEventos,
@@ -497,13 +475,18 @@ router.get("/crm-dashboard", verificarTokenCrm, async (req, res) => {
     });
 
   } catch (erro) {
-    console.error(erro);
+    console.error("CRM Dashboard:", erro);
 
-    res.status(500).json({
-      erro: "Erro ao carregar Dashboard."
+    return res.status(500).json({
+      erro: "Erro ao carregar Dashboard.",
+      detalhe:
+        process.env.NODE_ENV === "production"
+          ? undefined
+          : String(erro?.message || erro)
     });
   }
 });
+
 
 /* ROTAS TÉCNICAS EXISTENTES - preservadas */
 router.post("/login", async (req, res) => {
