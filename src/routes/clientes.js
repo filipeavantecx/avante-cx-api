@@ -103,8 +103,36 @@ async function verificarTokenClientesHibrido_(req, res, next) {
         });
       }
 
+      /*
+       * O módulo Clientes ainda possui colunas de auditoria numéricas
+       * (ex.: criado_por). Para manter compatibilidade, tentamos localizar
+       * o mesmo usuário na tabela técnica "usuarios" pelo e-mail.
+       */
+      let idTecnico = null;
+
+      if (usuario.email) {
+        try {
+          const tecnico = await db.query(
+            `SELECT id
+             FROM usuarios
+             WHERE LOWER(COALESCE(email, '')) = LOWER($1)
+             LIMIT 1`,
+            [usuario.email]
+          );
+
+          if (tecnico.rows.length) {
+            idTecnico = tecnico.rows[0].id;
+          }
+        } catch (e) {
+          console.warn(
+            "Não foi possível resolver usuário técnico para auditoria:",
+            e?.message || e
+          );
+        }
+      }
+
       req.usuario = {
-        id: null,
+        id: idTecnico,
         idLegado: usuario.usuario_id,
         nome: usuario.nome || "",
         email: usuario.email || "",
@@ -630,7 +658,10 @@ router.post("/", async (req, res) => {
     console.error("ERRO POST /clientes:", erro);
 
     res.status(500).json({
-      erro: "Erro ao cadastrar cliente",
+      erro:
+        erro && erro.message
+          ? "Erro ao cadastrar cliente: " + erro.message
+          : "Erro ao cadastrar cliente",
       detalhe: erro && erro.message ? erro.message : null,
       codigo: erro && erro.code ? erro.code : null,
       constraint: erro && erro.constraint ? erro.constraint : null,
