@@ -9,8 +9,8 @@ const router = express.Router();
 
 /* ============================================================
    AVANTE CX - AUTH
-   1) /login e /me = autenticação técnica/legada já existente
-   2) /crm-login e /crm-me = autenticação do AVANTE CX (usuarios_legado)
+   1) /login e /me = autenticao tcnica/legada j existente
+   2) /crm-login e /crm-me = autenticao do AVANTE CX (usuarios_legado)
 
    IMPORTANTE:
    - O token CRM usa segredo separado, derivado de JWT_SECRET (ou CRM_JWT_SECRET, se definido).
@@ -77,7 +77,7 @@ function resolverFotoUrl(usuario) {
 function montarUsuarioPublico(usuario) {
   return {
     id: usuario.usuario_id,
-    nome: usuario.nome || usuario.login || "Usuário",
+    nome: usuario.nome || usuario.login || "Usurio",
     email: usuario.email || "",
     fotoId: usuario.foto_id || "",
     fotoUrl: resolverFotoUrl(usuario),
@@ -91,7 +91,7 @@ function montarUsuarioPublico(usuario) {
 
 function hashSenhaLegada(senha, salt) {
   const segredo = String(process.env.AVANTE_AUTH_SECRET_V1 || "");
-  if (!segredo) throw new Error("AVANTE_AUTH_SECRET_V1 não configurado no Railway");
+  if (!segredo) throw new Error("AVANTE_AUTH_SECRET_V1 no configurado no Railway");
   return crypto.createHmac("sha256", segredo)
     .update(`${String(salt || "")}|${String(senha || "")}`, "utf8")
     .digest("hex");
@@ -102,11 +102,11 @@ function segredoCrmJwt() {
   if (dedicado) return dedicado;
 
   const base = String(process.env.JWT_SECRET || "").trim();
-  if (!base) throw new Error("JWT_SECRET não configurado no Railway");
+  if (!base) throw new Error("JWT_SECRET no configurado no Railway");
 
   /*
-   * Derivação por domínio: o token CRM NÃO valida no middleware
-   * técnico que usa JWT_SECRET diretamente.
+   * Derivao por domnio: o token CRM NO valida no middleware
+   * tcnico que usa JWT_SECRET diretamente.
    */
   return crypto
     .createHmac("sha256", base)
@@ -145,18 +145,18 @@ function verificarTokenCrm(req, res, next) {
   try {
     const cabecalho = String(req.headers.authorization || "");
     const token = cabecalho.startsWith("Bearer ") ? cabecalho.slice(7).trim() : "";
-    if (!token) return res.status(401).json({ autenticado:false, erro:"Sessão não informada" });
+    if (!token) return res.status(401).json({ autenticado:false, erro:"Sesso no informada" });
 
     const payload = jwt.verify(token, segredoCrmJwt(), {
       issuer: "avante-cx",
       audience: "avante-cx-web"
     });
 
-    if (payload.tipo !== "crm") return res.status(401).json({ autenticado:false, erro:"Sessão inválida" });
+    if (payload.tipo !== "crm") return res.status(401).json({ autenticado:false, erro:"Sesso invlida" });
     req.usuarioCrm = payload;
     next();
   } catch (erro) {
-    return res.status(401).json({ autenticado:false, expirada:erro?.name === "TokenExpiredError", erro:"Sessão inválida ou expirada" });
+    return res.status(401).json({ autenticado:false, expirada:erro?.name === "TokenExpiredError", erro:"Sesso invlida ou expirada" });
   }
 }
 
@@ -173,7 +173,7 @@ router.get("/crm-auth-status", async (req, res) => {
     });
   } catch (erro) {
     console.error(erro);
-    res.status(500).json({ sucesso:false, erro:"Falha ao validar autenticação CRM" });
+    res.status(500).json({ sucesso:false, erro:"Falha ao validar autenticao CRM" });
   }
 });
 
@@ -197,19 +197,19 @@ router.post("/crm-login", async (req, res) => {
 
     if (!resultado.rows.length) {
       registrarFalhaCrm(chaveRate);
-      return res.status(401).json({ erro:"Login ou senha inválidos." });
+      return res.status(401).json({ erro:"Login ou senha invlidos." });
     }
 
     const usuario = resultado.rows[0];
 
     if (String(usuario.status || "").trim().toUpperCase() !== "ATIVO") {
       registrarFalhaCrm(chaveRate);
-      return res.status(401).json({ erro:"Login ou senha inválidos." });
+      return res.status(401).json({ erro:"Login ou senha invlidos." });
     }
 
     if (!usuario.senha_hash || !usuario.senha_salt) {
       registrarFalhaCrm(chaveRate);
-      return res.status(401).json({ erro:"Login ou senha inválidos." });
+      return res.status(401).json({ erro:"Login ou senha invlidos." });
     }
 
     const hashInformado = hashSenhaLegada(senha, usuario.senha_salt);
@@ -220,7 +220,7 @@ router.post("/crm-login", async (req, res) => {
 
     if (!senhaCorreta) {
       registrarFalhaCrm(chaveRate);
-      return res.status(401).json({ erro:"Login ou senha inválidos." });
+      return res.status(401).json({ erro:"Login ou senha invlidos." });
     }
 
     limparFalhasCrm(chaveRate);
@@ -243,7 +243,7 @@ router.post("/crm-login", async (req, res) => {
       SET ultimo_acesso = NOW(), data_atualizacao = NOW()
       WHERE usuario_id = $1
     `, [usuario.usuario_id]).catch((erro) => {
-      console.warn("Não foi possível atualizar ultimo_acesso:", erro?.message || erro);
+      console.warn("No foi possvel atualizar ultimo_acesso:", erro?.message || erro);
     });
 
     res.json({
@@ -269,17 +269,17 @@ router.get("/crm-me", verificarTokenCrm, async (req, res) => {
       LIMIT 1
     `, [req.usuarioCrm.id]);
 
-    if (!resultado.rows.length) return res.status(401).json({ autenticado:false, erro:"Usuário não encontrado." });
+    if (!resultado.rows.length) return res.status(401).json({ autenticado:false, erro:"Usurio no encontrado." });
 
     const usuario = resultado.rows[0];
     if (String(usuario.status || "").trim().toUpperCase() !== "ATIVO") {
-      return res.status(403).json({ autenticado:false, erro:"Usuário inativo." });
+      return res.status(403).json({ autenticado:false, erro:"Usurio inativo." });
     }
 
     res.json({ autenticado:true, usuario:montarUsuarioPublico(usuario) });
   } catch (erro) {
     console.error(erro);
-    res.status(500).json({ autenticado:false, erro:"Erro ao validar sessão." });
+    res.status(500).json({ autenticado:false, erro:"Erro ao validar sesso." });
   }
 });
 
@@ -307,7 +307,7 @@ router.get("/crm-dashboard", verificarTokenCrm, async (req, res) => {
 
     if (!usuarioResultado.rows.length) {
       return res.status(401).json({
-        erro: "Usuário não encontrado."
+        erro: "Usurio no encontrado."
       });
     }
 
@@ -316,7 +316,7 @@ router.get("/crm-dashboard", verificarTokenCrm, async (req, res) => {
 
     if (!publico.permissoes?.PODE_DASHBOARD) {
       return res.status(403).json({
-        erro: "Você não possui permissão para acessar o Dashboard."
+        erro: "Voc no possui permisso para acessar o Dashboard."
       });
     }
 
@@ -352,7 +352,7 @@ router.get("/crm-dashboard", verificarTokenCrm, async (req, res) => {
 
     /*
      * Consultas pequenas e paralelas.
-     * Não usamos SELECT * de tabelas inteiras.
+     * No usamos SELECT * de tabelas inteiras.
      */
     const [
       totalClientes,
@@ -488,11 +488,11 @@ router.get("/crm-dashboard", verificarTokenCrm, async (req, res) => {
 });
 
 
-/* ROTAS TÉCNICAS EXISTENTES - preservadas */
+/* ROTAS TCNICAS EXISTENTES - preservadas */
 router.post("/login", async (req, res) => {
   try {
     const { email, senha } = req.body;
-    if (!email || !senha) return res.status(400).json({ erro:"Email e senha são obrigatórios" });
+    if (!email || !senha) return res.status(400).json({ erro:"Email e senha so obrigatrios" });
 
     const resultado = await db.query(`
       SELECT id, nome, email, senha_hash, perfil, ativo
@@ -501,12 +501,12 @@ router.post("/login", async (req, res) => {
       LIMIT 1
     `, [email]);
 
-    if (resultado.rows.length === 0) return res.status(401).json({ erro:"Email ou senha inválidos" });
+    if (resultado.rows.length === 0) return res.status(401).json({ erro:"Email ou senha invlidos" });
     const usuario = resultado.rows[0];
-    if (!usuario.ativo) return res.status(403).json({ erro:"Usuário inativo" });
+    if (!usuario.ativo) return res.status(403).json({ erro:"Usurio inativo" });
 
     const senhaCorreta = await bcrypt.compare(senha, usuario.senha_hash);
-    if (!senhaCorreta) return res.status(401).json({ erro:"Email ou senha inválidos" });
+    if (!senhaCorreta) return res.status(401).json({ erro:"Email ou senha invlidos" });
 
     const token = jwt.sign({ id:usuario.id, email:usuario.email, perfil:usuario.perfil }, process.env.JWT_SECRET, { expiresIn:"8h" });
 
@@ -530,13 +530,161 @@ router.get("/me", verificarToken, async (req, res) => {
       LIMIT 1
     `, [req.usuario.id]);
 
-    if (resultado.rows.length === 0) return res.status(404).json({ erro:"Usuário não encontrado" });
+    if (resultado.rows.length === 0) return res.status(404).json({ erro:"Usurio no encontrado" });
     const usuario = resultado.rows[0];
-    if (!usuario.ativo) return res.status(403).json({ erro:"Usuário inativo" });
+    if (!usuario.ativo) return res.status(403).json({ erro:"Usurio inativo" });
     res.json({ usuario });
   } catch (erro) {
     console.error(erro);
-    res.status(500).json({ erro:"Erro ao buscar usuário" });
+    res.status(500).json({ erro:"Erro ao buscar usurio" });
+  }
+});
+
+
+// ======================================================
+// CRM FINANCEIRO - LEITURA DIRETA NODE / POSTGRESQL
+// ======================================================
+
+router.get("/crm-financeiro", verificarTokenCrm, async (req, res) => {
+  try {
+    const usuarioR = await db.query(
+      `SELECT usuario_id,perfil,status,pode_financeiro
+       FROM usuarios_legado
+       WHERE usuario_id=$1
+       LIMIT 1`,
+      [req.usuarioCrm.id]
+    );
+
+    if (!usuarioR.rows.length) {
+      return res.status(401).json({
+        autenticado:false,
+        erro:"Usurio no encontrado."
+      });
+    }
+
+    const usuario = usuarioR.rows[0];
+    const perfil = String(usuario.perfil || "").trim().toUpperCase();
+    const permitido =
+      boolSistema(usuario.pode_financeiro) ||
+      ["ADMINISTRADOR","GESTOR"].includes(perfil);
+
+    if (!permitido) {
+      return res.status(403).json({
+        erro:"Voc no possui permisso para acessar o Financeiro."
+      });
+    }
+
+    const [receberR,pagarR,fluxoR,bancosR,clientesR] = await Promise.all([
+      db.query(
+        `SELECT *
+         FROM contas_receber
+         ORDER BY data_vencimento ASC NULLS LAST, id DESC`
+      ),
+      db.query(
+        `SELECT *
+         FROM contas_pagar
+         ORDER BY data_vencimento ASC NULLS LAST, id DESC`
+      ),
+      db.query(
+        `SELECT *
+         FROM fluxo_caixa
+         ORDER BY data DESC NULLS LAST, id DESC`
+      ),
+      db.query(
+        `SELECT *
+         FROM bancos_financeiro
+         ORDER BY nome ASC NULLS LAST, id ASC`
+      ),
+      db.query(
+        `SELECT id_cliente,nome_completo,email,telefone,status_cliente,ativo
+         FROM clientes
+         WHERE COALESCE(ativo,TRUE)=TRUE
+         ORDER BY nome_completo ASC`
+      )
+    ]);
+
+    const num = v => Number(v || 0) || 0;
+    const statusAtivo = s =>
+      String(s || "").trim().toUpperCase() !== "CANCELADO";
+
+    const recebido = receberR.rows.reduce(
+      (s,x) => s + num(x.valor_pago),
+      0
+    );
+
+    const aReceber = receberR.rows
+      .filter(x => statusAtivo(x.status))
+      .reduce(
+        (s,x) => s + num(
+          x.saldo_aberto !== null && x.saldo_aberto !== undefined
+            ? x.saldo_aberto
+            : Math.max(0, num(x.valor_final || x.valor) - num(x.valor_pago))
+        ),
+        0
+      );
+
+    const pago = pagarR.rows.reduce(
+      (s,x) => s + num(x.valor_pago),
+      0
+    );
+
+    const aPagar = pagarR.rows
+      .filter(x => statusAtivo(x.status))
+      .reduce(
+        (s,x) => s + num(
+          x.saldo_aberto !== null && x.saldo_aberto !== undefined
+            ? x.saldo_aberto
+            : Math.max(0, num(x.valor_final || x.valor) - num(x.valor_pago))
+        ),
+        0
+      );
+
+    res.json({
+      sucesso:true,
+      financeiro:{
+        receber:receberR.rows,
+        pagar:pagarR.rows,
+        fluxo:fluxoR.rows,
+        bancos:bancosR.rows,
+        clientes:clientesR.rows,
+        resumo:{
+          recebido,
+          aReceber,
+          pago,
+          aPagar,
+          saldoRealizado:recebido - pago
+        },
+        relatorios:{
+          recebido,
+          aReceber,
+          pago,
+          aPagar,
+          saldoRealizado:recebido - pago
+        },
+        opcoes:{
+          tiposConta:[
+            "CONTA_CORRENTE","POUPANCA","CONTA_DIGITAL",
+            "CARTEIRA","CAIXA","INVESTIMENTO","OUTRO"
+          ],
+          formasPagamento:[
+            "PIX","DINHEIRO","CARTAO_CREDITO","CARTAO_DEBITO",
+            "BOLETO","TRANSFERENCIA","DEBITO_AUTOMATICO",
+            "CHEQUE","OUTRO"
+          ],
+          frequencias:[
+            "MENSAL","QUINZENAL","SEMANAL",
+            "TRIMESTRAL","SEMESTRAL","ANUAL"
+          ]
+        }
+      }
+    });
+
+  } catch (erro) {
+    console.error("GET /auth/crm-financeiro:", erro);
+    res.status(500).json({
+      erro:"Erro ao carregar Financeiro.",
+      detalhe:erro?.message || null
+    });
   }
 });
 

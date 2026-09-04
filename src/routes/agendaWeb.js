@@ -490,6 +490,150 @@ async function agendaBuscarPorIdWeb_(id) {
   return r.rows[0] || null;
 }
 
+
+function googleDateTimePartes_(evento = {}) {
+  const inicio =
+    evento?.start?.dateTime ||
+    evento?.start?.date ||
+    "";
+
+  const fim =
+    evento?.end?.dateTime ||
+    evento?.end?.date ||
+    "";
+
+  const data =
+    String(inicio || "").slice(0,10);
+
+  let horaInicio = "";
+  let horaFim = "";
+
+  const mi =
+    String(inicio || "").match(/T(\d{2}:\d{2})/);
+
+  const mf =
+    String(fim || "").match(/T(\d{2}:\d{2})/);
+
+  if (mi) horaInicio = mi[1];
+  if (mf) horaFim = mf[1];
+
+  return {
+    data,
+    horaInicio,
+    horaFim
+  };
+}
+
+async function listarEventosGoogleNode_(periodoDias) {
+  const cfg = googleCalendarConfig_();
+
+  const agora = new Date();
+  agora.setHours(0,0,0,0);
+
+  const limite =
+    new Date(
+      agora.getTime() +
+      Number(periodoDias || 30) *
+      24 * 60 * 60 * 1000
+    );
+
+  let pageToken = "";
+  const itens = [];
+
+  do {
+    const qs = new URLSearchParams({
+      singleEvents:"true",
+      orderBy:"startTime",
+      timeMin:agora.toISOString(),
+      timeMax:limite.toISOString(),
+      maxResults:"250"
+    });
+
+    if (pageToken) {
+      qs.set("pageToken", pageToken);
+    }
+
+    const resposta =
+      await googleCalendarRequest_(
+        "GET",
+        "/events?" + qs.toString()
+      );
+
+    const pagina =
+      Array.isArray(resposta?.items)
+        ? resposta.items
+        : [];
+
+    pagina.forEach(function(evento) {
+      if (
+        String(evento?.status || "").toLowerCase() ===
+        "cancelled"
+      ) {
+        return;
+      }
+
+      const partes =
+        googleDateTimePartes_(evento);
+
+      itens.push({
+        AGENDA_ID:
+          "GOOGLE:" +
+          String(evento.id || ""),
+
+        GOOGLE_EVENT_ID:
+          String(evento.id || ""),
+
+        CALENDAR_ID:
+          cfg.calendarId,
+
+        TITULO:
+          evento.summary ||
+          "Compromisso",
+
+        TIPO_EVENTO:
+          "EVENTO",
+
+        ID_CLIENTE:"",
+        ID_FUNCIONARIO:"",
+        ID_SESSAO:"",
+
+        DATA:
+          partes.data,
+
+        HORA_INICIO:
+          partes.horaInicio,
+
+        HORA_FIM:
+          partes.horaFim,
+
+        LOCAL:
+          evento.location || "",
+
+        DESCRICAO:
+          evento.description || "",
+
+        CONVIDADOS:
+          Array.isArray(evento.attendees)
+            ? evento.attendees
+                .map(x => x?.email || "")
+                .filter(Boolean)
+                .join(", ")
+            : "",
+
+        STATUS:"AGENDADO",
+        ORIGEM:"GOOGLE",
+        SOMENTE_GOOGLE:true
+      });
+    });
+
+    pageToken =
+      String(resposta?.nextPageToken || "");
+
+  } while (pageToken);
+
+  return itens;
+}
+
 router.get("/modulo", async (req, res) => {
   try {
     const periodoDias = Math.max(
@@ -500,45 +644,108 @@ router.get("/modulo", async (req, res) => {
       )
     );
 
-    const [agendaR, clientesR, funcionariosR] = await Promise.all([
-      db.query(
-        `SELECT *
-         FROM agenda
-         WHERE
-           UPPER(COALESCE(status,'AGENDADO')) <> 'CANCELADO'
-           AND (data IS NULL OR data >= CURRENT_DATE)
-           AND (
-             data IS NULL
-             OR data <= CURRENT_DATE + ($1::int * INTERVAL '1 day')
-           )
-         ORDER BY data ASC NULLS LAST, hora_inicio ASC NULLS LAST, id ASC`,
-        [periodoDias]
-      ),
+    const [agendaR, clientesR, funcionariosR] =
+      await Promise.all([
+        db.query(
+          `SELECT *
+           FROM agenda
+           WHERE
+             UPPER(COALESCE(status,'AGENDADO')) <> 'CANCELADO'
+             AND (data IS NULL OR data >= CURRENT_DATE)
+             AND (
+               data IS NULL
+               OR data <= CURRENT_DATE + ($1::int * INTERVAL '1 day')
+             )
+           ORDER BY data ASC NULLS LAST, hora_inicio ASC NULLS LAST, id ASC`,
+          [periodoDias]
+        ),
 
-      db.query(
-        `SELECT id_cliente,nome_completo,email
-         FROM clientes
-         WHERE
-           COALESCE(ativo,TRUE)=TRUE
-           AND UPPER(COALESCE(status_cliente,'ATIVO')) <> 'INATIVO'
-         ORDER BY nome_completo ASC`
-      ),
+        db.query(
+          `SELECT id_cliente,nome_completo,email
+           FROM clientes
+           WHERE
+             COALESCE(ativo,TRUE)=TRUE
+             AND UPPER(COALESCE(status_cliente,'ATIVO')) <> 'INATIVO'
+           ORDER BY nome_completo ASC`
+        ),
 
-      db.query(
-        `SELECT funcionario_id,nome_completo,email
-         FROM funcionarios
-         WHERE UPPER(COALESCE(status,'ATIVO'))='ATIVO'
-         ORDER BY nome_completo ASC`
-      )
-    ]);
+        db.query(
+          `SELECT funcionario_id,nome_completo,email
+           FROM funcionarios
+           WHERE UPPER(COALESCE(status,'ATIVO'))='ATIVO'
+           ORDER BY nome_completo ASC`
+        )
+      ]);
+
+    const locais =
+      agendaR.rows.map(agendaDtoWeb_);
+
+    let google = [];
+    let avisoGoogle = "";
+
+    try {
+      google =
+        await listarEventosGoogleNode_(
+          periodoDias
+        );
+    } catch (erroGoogle) {
+      avisoGoogle =
+        erroGoogle?.message ||
+        "Não foi possível ler eventos existentes do Google Calendar.";
+
+      console.warn(
+        "Agenda /modulo Google:",
+        avisoGoogle
+      );
+    }
+
+    const googleIdsLocais =
+      new Set(
+        locais
+          .map(x =>
+            String(
+              x.GOOGLE_EVENT_ID || ""
+            ).trim()
+          )
+          .filter(Boolean)
+      );
+
+    const somenteGoogle =
+      google.filter(function(evento) {
+        return !googleIdsLocais.has(
+          String(
+            evento.GOOGLE_EVENT_ID || ""
+          ).trim()
+        );
+      });
+
+    const eventos =
+      locais
+        .concat(somenteGoogle)
+        .sort(function(a,b) {
+          const ka =
+            String(a.DATA || "9999-12-31") +
+            " " +
+            String(a.HORA_INICIO || "23:59");
+
+          const kb =
+            String(b.DATA || "9999-12-31") +
+            " " +
+            String(b.HORA_INICIO || "23:59");
+
+          return ka.localeCompare(kb);
+        });
 
     return res.json({
       sucesso: true,
-      fonte: "API_POSTGRESQL",
+      fonte: avisoGoogle
+        ? "API_POSTGRESQL_COM_GOOGLE_PARCIAL"
+        : "API_POSTGRESQL_GOOGLE",
       agenda: {
-        eventos: agendaR.rows.map(agendaDtoWeb_),
+        eventos,
         periodoDias
       },
+      avisoGoogle,
       clientes: clientesR.rows.map(x => ({
         ID_CLIENTE: x.id_cliente || "",
         NOME_COMPLETO: x.nome_completo || "",
