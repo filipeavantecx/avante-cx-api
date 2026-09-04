@@ -130,84 +130,6 @@ async function verificarTokenCrmAgenda_(req, res, next) {
   }
 }
 
-
-// ======================================================
-// DIAGNÓSTICO TEMPORÁRIO DE JWT CRM - PÚBLICO
-// Colocado ANTES do router.use para diagnosticar o Bearer.
-// Não expõe token nem segredos.
-// REMOVER APÓS O TESTE.
-// ======================================================
-router.get("/debug-token", async (req, res) => {
-  try {
-    const cabecalho = String(req.headers.authorization || "");
-    const token = cabecalho.startsWith("Bearer ")
-      ? cabecalho.slice(7).trim()
-      : "";
-
-    if (!token) {
-      return res.status(200).json({
-        sucesso: true,
-        rotaDebugAtiva: true,
-        tokenRecebido: false,
-        mensagem: "Rota de diagnóstico publicada. Nenhum Bearer foi enviado."
-      });
-    }
-
-    const partes = token.split(".");
-    let decode = null;
-    try {
-      decode = jwt.decode(token) || null;
-    } catch (e) {}
-
-    let validado = null;
-    let erroValidacao = null;
-
-    try {
-      validado = jwt.verify(
-        token,
-        segredoCrmJwtAgenda_(),
-        {
-          issuer: "avante-cx",
-          audience: "avante-cx-web"
-        }
-      );
-    } catch (erro) {
-      erroValidacao = {
-        nome: erro?.name || "",
-        mensagem: erro?.message || ""
-      };
-    }
-
-    return res.status(200).json({
-      sucesso: true,
-      rotaDebugAtiva: true,
-      tokenRecebido: true,
-      partesJwt: partes.length,
-      jwtFormatoValido: partes.length === 3,
-      segredoCrmDedicadoConfigurado:
-        !!String(process.env.CRM_JWT_SECRET || "").trim(),
-      jwtSecretBaseConfigurado:
-        !!String(process.env.JWT_SECRET || "").trim(),
-      decode: decode ? {
-        tipo: decode.tipo || null,
-        id: decode.id || null,
-        issuer: decode.iss || null,
-        audience: decode.aud || null,
-        exp: decode.exp || null,
-        iat: decode.iat || null
-      } : null,
-      tokenValidoAgenda: !!validado,
-      erroValidacao
-    });
-  } catch (erro) {
-    return res.status(200).json({
-      sucesso: false,
-      rotaDebugAtiva: true,
-      erro: erro?.message || "Erro interno"
-    });
-  }
-});
-
 router.use(verificarTokenCrmAgenda_);
 
 
@@ -421,10 +343,15 @@ async function googleCalendarRequest_(metodo, caminho, body) {
   }
 
   if (!resposta.ok) {
-    throw new Error(
+    const erroGoogle = new Error(
       dados?.error?.message ||
       "Falha no Google Calendar."
     );
+
+    erroGoogle.statusGoogle = resposta.status;
+    erroGoogle.detalheGoogle = dados?.error || null;
+
+    throw erroGoogle;
   }
 
   return dados;
@@ -723,15 +650,10 @@ router.post("/", async (req, res) => {
 
 router.put("/:id", async (req, res) => {
   try {
-    const atual =
-      await agendaBuscarPorIdWeb_(
-        req.params.id
-      );
+    const atual = await agendaBuscarPorIdWeb_(req.params.id);
 
     if (!atual) {
-      return res.status(404).json({
-        erro: "Compromisso não encontrado."
-      });
+      return res.status(404).json({ erro: "Compromisso não encontrado." });
     }
 
     const d = req.body || {};
@@ -770,83 +692,93 @@ router.put("/:id", async (req, res) => {
       ]
     );
 
-    const row = r.rows[0];
+    let row = r.rows[0];
+
+    const payloadGoogle = {
+      TITULO: row.titulo,
+      TIPO_EVENTO: row.tipo_evento,
+      ID_CLIENTE: row.id_cliente,
+      ID_FUNCIONARIO: row.id_funcionario,
+      DATA: row.data,
+      HORA_INICIO: row.hora_inicio,
+      HORA_FIM: row.hora_fim,
+      LOCAL: row.local,
+      DESCRICAO: row.descricao,
+      CONVIDADOS: row.convidados
+    };
+
     let sincronizadoGoogle = false;
     let avisoGoogle = "";
+    let recriadoGoogle = false;
 
     try {
       if (row.google_event_id) {
-        await atualizarEventoGoogleNode_(
-          row.google_event_id,
-          {
-            TITULO: row.titulo,
-            TIPO_EVENTO: row.tipo_evento,
-            ID_CLIENTE: row.id_cliente,
-            ID_FUNCIONARIO: row.id_funcionario,
-            DATA: row.data,
-            HORA_INICIO: row.hora_inicio,
-            HORA_FIM: row.hora_fim,
-            LOCAL: row.local,
-            DESCRICAO: row.descricao,
-            CONVIDADOS: row.convidados
+        try {
+          await atualizarEventoGoogleNode_(row.google_event_id, payloadGoogle);
+          sincronizadoGoogle = true;
+        } catch (erroAtualizacaoGoogle) {
+          if ([404,410].includes(Number(erroAtualizacaoGoogle?.statusGoogle))) {
+            const googleNovo = await criarEventoGoogleNode_(payloadGoogle);
+
+            if (googleNovo?.id) {
+              const atualizadoGoogle = await db.query(
+                `UPDATE agenda
+                 SET google_event_id=$1,
+                     calendar_id=$2,
+                     data_atualizacao=NOW()
+                 WHERE id=$3
+                 RETURNING *`,
+                [googleNovo.id, googleCalendarConfig_().calendarId, row.id]
+              );
+
+              row = atualizadoGoogle.rows[0] || row;
+              sincronizadoGoogle = true;
+              recriadoGoogle = true;
+            }
+          } else {
+            throw erroAtualizacaoGoogle;
           }
-        );
-
-        sincronizadoGoogle = true;
+        }
       } else {
-        const google =
-          await criarEventoGoogleNode_({
-            TITULO: row.titulo,
-            TIPO_EVENTO: row.tipo_evento,
-            ID_CLIENTE: row.id_cliente,
-            ID_FUNCIONARIO: row.id_funcionario,
-            DATA: row.data,
-            HORA_INICIO: row.hora_inicio,
-            HORA_FIM: row.hora_fim,
-            LOCAL: row.local,
-            DESCRICAO: row.descricao,
-            CONVIDADOS: row.convidados
-          });
+        const googleNovo = await criarEventoGoogleNode_(payloadGoogle);
 
-        if (google.id) {
-          await db.query(
+        if (googleNovo?.id) {
+          const atualizadoGoogle = await db.query(
             `UPDATE agenda
              SET google_event_id=$1,
                  calendar_id=$2,
                  data_atualizacao=NOW()
-             WHERE id=$3`,
-            [
-              google.id,
-              googleCalendarConfig_().calendarId,
-              row.id
-            ]
+             WHERE id=$3
+             RETURNING *`,
+            [googleNovo.id, googleCalendarConfig_().calendarId, row.id]
           );
 
-          row.google_event_id = google.id;
-          row.calendar_id =
-            googleCalendarConfig_().calendarId;
-
+          row = atualizadoGoogle.rows[0] || row;
           sincronizadoGoogle = true;
+          recriadoGoogle = true;
         }
       }
     } catch (erroGoogle) {
-      avisoGoogle =
-        erroGoogle?.message ||
-        "Evento atualizado no CRM, mas não no Google Calendar.";
+      avisoGoogle = erroGoogle?.message || "Evento atualizado no CRM, mas não no Google Calendar.";
 
-      console.warn(
-        "Atualização Google Agenda falhou:",
-        avisoGoogle
-      );
+      console.warn("Atualização Google Agenda falhou:", {
+        agendaId: row?.agenda_id || "",
+        googleEventId: row?.google_event_id || "",
+        statusGoogle: erroGoogle?.statusGoogle || null,
+        erro: avisoGoogle
+      });
     }
 
     return res.json({
       sucesso: true,
-      mensagem:
-        sincronizadoGoogle
-          ? "Compromisso atualizado no AVANTE CX e no Google Calendar."
-          : "Compromisso atualizado no AVANTE CX.",
+      mensagem: sincronizadoGoogle
+        ? (recriadoGoogle
+            ? "Compromisso atualizado no AVANTE CX e recriado/sincronizado no Google Calendar."
+            : "Compromisso atualizado no AVANTE CX e no Google Calendar.")
+        : ("Compromisso atualizado no AVANTE CX." +
+           (avisoGoogle ? " Google Calendar: " + avisoGoogle : "")),
       sincronizadoGoogle,
+      recriadoGoogle,
       avisoGoogle,
       evento: agendaDtoWeb_(row)
     });
@@ -855,12 +787,11 @@ router.put("/:id", async (req, res) => {
     console.error("agendaWeb PUT:", erro);
 
     return res.status(500).json({
-      erro:
-        "Erro ao atualizar compromisso: " +
-        (erro?.message || "erro interno")
+      erro: "Erro ao atualizar compromisso: " + (erro?.message || "erro interno")
     });
   }
 });
+
 
 router.patch("/:id/cancelar", async (req, res) => {
   try {
