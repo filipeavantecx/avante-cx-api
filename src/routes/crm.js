@@ -138,7 +138,13 @@ router.use((req, res, next) => {
   if (
     req.path.startsWith("/produtos") ||
     req.path.startsWith("/planos") ||
-    req.path.startsWith("/mentores")
+    req.path.startsWith("/mentores") ||
+    req.path.startsWith("/contas-receber") ||
+    req.path.startsWith("/contas-pagar") ||
+    req.path.startsWith("/fluxo-caixa") ||
+    req.path.startsWith("/bancos-financeiro") ||
+    req.path.startsWith("/comissoes") ||
+    req.path.startsWith("/financeiro")
   ) {
     return next();
   }

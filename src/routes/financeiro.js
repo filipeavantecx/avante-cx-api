@@ -2,8 +2,154 @@ const express = require("express");
 const db = require("../database/db");
 const verificarToken = require("../middleware/auth");
 
+const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
+
+function segredoCrmFinanceiro_() {
+  const direto =
+    String(
+      process.env.CRM_JWT_SECRET || ""
+    ).trim();
+
+  if (direto) return direto;
+
+  const base =
+    String(
+      process.env.JWT_SECRET || ""
+    ).trim();
+
+  if (!base) {
+    throw new Error(
+      "JWT_SECRET/CRM_JWT_SECRET não configurado."
+    );
+  }
+
+  return crypto
+    .createHmac("sha256", base)
+    .update(
+      "AVANTE_CRM_WEB_V1",
+      "utf8"
+    )
+    .digest("hex");
+}
+
+async function verificarTokenFinanceiro_(req, res, next) {
+  const auth =
+    String(
+      req.headers.authorization || ""
+    );
+
+  const token =
+    auth.startsWith("Bearer ")
+      ? auth.slice(7).trim()
+      : "";
+
+  if (!token) {
+    return res.status(401).json({
+      erro: "Token não informado"
+    });
+  }
+
+  /*
+   * Primeiro tenta o JWT CRM do navegador.
+   * Se não for CRM, mantém compatibilidade
+   * com o middleware técnico já existente.
+   */
+  try {
+    const payload =
+      jwt.verify(
+        token,
+        segredoCrmFinanceiro_(),
+        {
+          issuer: "avante-cx",
+          audience: "avante-cx-web"
+        }
+      );
+
+    if (
+      String(payload?.tipo || "") !==
+      "crm"
+    ) {
+      throw new Error(
+        "Token não é CRM"
+      );
+    }
+
+    const usuarioR =
+      await db.query(
+        `SELECT
+           usuario_id,
+           nome,
+           email,
+           perfil,
+           status,
+           pode_financeiro
+         FROM usuarios_legado
+         WHERE usuario_id=$1
+         LIMIT 1`,
+        [payload.id]
+      );
+
+    if (!usuarioR.rows.length) {
+      return res.status(401).json({
+        erro: "Usuário não encontrado"
+      });
+    }
+
+    const usuario =
+      usuarioR.rows[0];
+
+    if (
+      String(usuario.status || "")
+        .trim()
+        .toUpperCase() !==
+      "ATIVO"
+    ) {
+      return res.status(403).json({
+        erro: "Usuário inativo"
+      });
+    }
+
+    const perfil =
+      String(usuario.perfil || "")
+        .trim()
+        .toUpperCase();
+
+    const permitido =
+      usuario.pode_financeiro === true ||
+      ["ADMINISTRADOR","GESTOR"]
+        .includes(perfil);
+
+    if (!permitido) {
+      return res.status(403).json({
+        erro:
+          "Você não possui permissão para acessar o Financeiro."
+      });
+    }
+
+    req.user = {
+      id: usuario.usuario_id,
+      nome: usuario.nome || "",
+      email: usuario.email || "",
+      perfil
+    };
+
+    req.usuarioCrm = payload;
+
+    return next();
+
+  } catch (erroCrm) {
+    return verificarToken(
+      req,
+      res,
+      next
+    );
+  }
+}
+
+
 const router = express.Router();
-router.use(verificarToken);
+router.use(verificarTokenFinanceiro_);
 
 // ============================================================
 // HELPERS
