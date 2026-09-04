@@ -49,21 +49,21 @@ function resolverPermissoes(usuario) {
   const perfil = perfilSeguro(usuario.perfil);
   if (perfil === "SEM_ACESSO") return { ...PERFIS_AVANTE.SEM_ACESSO };
 
-  const permissãoes = { ...PERFIS_AVANTE[perfil] };
+  const permissoes = { ...PERFIS_AVANTE[perfil] };
 
-  Object.keys(permissãoes).forEach((campo) => {
+  Object.keys(permissoes).forEach((campo) => {
     if (campo === "PODE_AGENDA") {
-      permissãoes[campo] = true;
+      permissoes[campo] = true;
       return;
     }
     const coluna = campo.toLowerCase();
     if (usuario[coluna] !== "" && usuario[coluna] !== null && usuario[coluna] !== undefined) {
-      permissãoes[campo] = boolSistema(usuario[coluna]);
+      permissoes[campo] = boolSistema(usuario[coluna]);
     }
   });
 
-  permissãoes.PODE_AGENDA = true;
-  return permissãoes;
+  permissoes.PODE_AGENDA = true;
+  return permissoes;
 }
 
 function resolverFotoUrl(usuario) {
@@ -85,7 +85,7 @@ function montarUsuarioPublico(usuario) {
     perfil: perfilSeguro(usuario.perfil),
     idFuncionario: usuario.id_funcionario || "",
     primeiroAcesso: boolSistema(usuario.primeiro_acesso),
-    permissãoes: resolverPermissoes(usuario)
+    permissoes: resolverPermissoes(usuario)
   };
 }
 
@@ -145,7 +145,7 @@ function verificarTokenCrm(req, res, next) {
   try {
     const cabecalho = String(req.headers.authorization || "");
     const token = cabecalho.startsWith("Bearer ") ? cabecalho.slice(7).trim() : "";
-    if (!token) return res.status(401).json({ autenticado:false, erro:"Sessão no informada" });
+    if (!token) return res.status(401).json({ autenticado:false, erro:"Sessão não informada" });
 
     const payload = jwt.verify(token, segredoCrmJwt(), {
       issuer: "avante-cx",
@@ -240,10 +240,10 @@ router.post("/crm-login", async (req, res) => {
 
     db.query(`
       UPDATE usuarios_legado
-      SET ultimo_acesso = NOW(), data_atualizacao = NOW()
+      SET último_acesso = NOW(), data_atualizacao = NOW()
       WHERE usuario_id = $1
     `, [usuario.usuario_id]).catch((erro) => {
-      console.warn("Não foi possível atualizar ultimo_acesso:", erro?.message || erro);
+      console.warn("Não foi possível atualizar último_acesso:", erro?.message || erro);
     });
 
     res.json({
@@ -269,7 +269,7 @@ router.get("/crm-me", verificarTokenCrm, async (req, res) => {
       LIMIT 1
     `, [req.usuarioCrm.id]);
 
-    if (!resultado.rows.length) return res.status(401).json({ autenticado:false, erro:"Usuário no encontrado." });
+    if (!resultado.rows.length) return res.status(401).json({ autenticado:false, erro:"Usuário não encontrado." });
 
     const usuario = resultado.rows[0];
     if (String(usuario.status || "").trim().toUpperCase() !== "ATIVO") {
@@ -307,14 +307,14 @@ router.get("/crm-dashboard", verificarTokenCrm, async (req, res) => {
 
     if (!usuarioResultado.rows.length) {
       return res.status(401).json({
-        erro: "Usuário no encontrado."
+        erro: "Usuário não encontrado."
       });
     }
 
     const usuario = usuarioResultado.rows[0];
     const publico = montarUsuarioPublico(usuario);
 
-    if (!publico.permissãoes?.PODE_DASHBOARD) {
+    if (!publico.permissoes?.PODE_DASHBOARD) {
       return res.status(403).json({
         erro: "Você não possui permissão para acessar o Dashboard."
       });
@@ -1752,7 +1752,7 @@ router.get("/me", verificarToken, async (req, res) => {
       LIMIT 1
     `, [req.usuario.id]);
 
-    if (resultado.rows.length === 0) return res.status(404).json({ erro:"Usuário no encontrado" });
+    if (resultado.rows.length === 0) return res.status(404).json({ erro:"Usuário não encontrado" });
     const usuario = resultado.rows[0];
     if (!usuario.ativo) return res.status(403).json({ erro:"Usuário inativo" });
     res.json({ usuario });
@@ -1780,7 +1780,7 @@ router.get("/crm-financeiro", verificarTokenCrm, async (req, res) => {
     if (!usuarioR.rows.length) {
       return res.status(401).json({
         autenticado:false,
-        erro:"Usuário no encontrado."
+        erro:"Usuário não encontrado."
       });
     }
 
