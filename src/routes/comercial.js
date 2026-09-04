@@ -544,7 +544,6 @@ router.post("/oportunidades/importar", async (req, res) => {
 
 router.get("/mentores", async (req,res) => {
   try {
-    await garantirSchemaCatalogo_();
     const r=await db.query("SELECT * FROM mentores ORDER BY nome ASC");
     res.json({ total:r.rows.length, mentores:r.rows });
   } catch(e) {
@@ -639,7 +638,6 @@ router.post("/mentores/importar", async (req,res) => {
 
 router.get("/produtos", async (req,res) => {
   try {
-    await garantirSchemaCatalogo_();
     const r=await db.query("SELECT * FROM produtos ORDER BY nome ASC");
     res.json({ total:r.rows.length, produtos:r.rows });
   } catch(e) {
@@ -739,7 +737,6 @@ router.post("/produtos/importar", async (req,res) => {
 
 router.get("/planos", async (req,res) => {
   try {
-    await garantirSchemaCatalogo_();
     const r=await db.query("SELECT * FROM planos ORDER BY nome ASC");
     res.json({ total:r.rows.length, planos:r.rows });
   } catch(e) {
