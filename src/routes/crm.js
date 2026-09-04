@@ -130,6 +130,19 @@ router.use((req, res, next) => {
     return verificarTokenCrmJornada_(req, res, next);
   }
 
+  /*
+   * Produtos / Planos / Mentores são atendidos pelo comercial.js.
+   * Não autenticar aqui com o token técnico antigo, pois isso bloqueia
+   * o JWT CRM antes de a requisição chegar ao router comercial.
+   */
+  if (
+    req.path.startsWith("/produtos") ||
+    req.path.startsWith("/planos") ||
+    req.path.startsWith("/mentores")
+  ) {
+    return next();
+  }
+
   return verificarToken(req, res, next);
 });
 
