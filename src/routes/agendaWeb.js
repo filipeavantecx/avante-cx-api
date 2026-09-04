@@ -233,9 +233,39 @@ async function googleAccessToken_() {
 }
 
 function googleDataHora_(data, hora) {
-  const d = String(data || "").slice(0, 10);
-  const h = String(hora || "00:00").slice(0, 5);
-  return `${d}T${h}:00`;
+  let d = "";
+
+  if (data instanceof Date) {
+    d = data.toISOString().slice(0, 10);
+  } else {
+    const textoData = String(data || "").trim();
+
+    const iso = textoData.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (iso) {
+      d = iso[1];
+    } else {
+      const br = textoData.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+      if (br) {
+        d = `${br[3]}-${br[2]}-${br[1]}`;
+      }
+    }
+  }
+
+  if (!d) {
+    throw new Error("Data inválida para sincronização com Google Calendar.");
+  }
+
+  let h = String(hora || "00:00").trim();
+
+  const matchHora = h.match(/^(\d{1,2}):(\d{2})/);
+  if (!matchHora) {
+    throw new Error("Hora inválida para sincronização com Google Calendar.");
+  }
+
+  const hh = String(Number(matchHora[1])).padStart(2, "0");
+  const mm = matchHora[2];
+
+  return `${d}T${hh}:${mm}:00`;
 }
 
 function googleEventoBody_(d) {
