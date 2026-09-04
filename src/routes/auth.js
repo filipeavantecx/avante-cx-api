@@ -9,8 +9,8 @@ const router = express.Router();
 
 /* ============================================================
    AVANTE CX - AUTH
-   1) /login e /me = autenticaÁ„o tÈcnica/legada j· existente
-   2) /crm-login e /crm-me = autenticaÁ„o do AVANTE CX (usuarios_legado)
+   1) /login e /me = autentica√ß√£o t√©cnica/legada j√° existente
+   2) /crm-login e /crm-me = autentica√ß√£o do AVANTE CX (usuarios_legado)
 
    IMPORTANTE:
    - O token CRM usa segredo separado, derivado de JWT_SECRET (ou CRM_JWT_SECRET, se definido).
@@ -77,7 +77,7 @@ function resolverFotoUrl(usuario) {
 function montarUsuarioPublico(usuario) {
   return {
     id: usuario.usuario_id,
-    nome: usuario.nome || usuario.login || "Usu·rio",
+    nome: usuario.nome || usuario.login || "Usu√°rio",
     email: usuario.email || "",
     fotoId: usuario.foto_id || "",
     fotoUrl: resolverFotoUrl(usuario),
@@ -91,7 +91,7 @@ function montarUsuarioPublico(usuario) {
 
 function hashSenhaLegada(senha, salt) {
   const segredo = String(process.env.AVANTE_AUTH_SECRET_V1 || "");
-  if (!segredo) throw new Error("AVANTE_AUTH_SECRET_V1 n„o configurado no Railway");
+  if (!segredo) throw new Error("AVANTE_AUTH_SECRET_V1 n√£o configurado no Railway");
   return crypto.createHmac("sha256", segredo)
     .update(`${String(salt || "")}|${String(senha || "")}`, "utf8")
     .digest("hex");
@@ -102,11 +102,11 @@ function segredoCrmJwt() {
   if (dedicado) return dedicado;
 
   const base = String(process.env.JWT_SECRET || "").trim();
-  if (!base) throw new Error("JWT_SECRET n„o configurado no Railway");
+  if (!base) throw new Error("JWT_SECRET n√£o configurado no Railway");
 
   /*
-   * DerivaÁ„o por domÌnio: o token CRM N√O valida no middleware
-   * tÈcnico que usa JWT_SECRET diretamente.
+   * Deriva√ß√£o por dom√≠nio: o token CRM N√ÉO valida no middleware
+   * t√©cnico que usa JWT_SECRET diretamente.
    */
   return crypto
     .createHmac("sha256", base)
@@ -145,18 +145,18 @@ function verificarTokenCrm(req, res, next) {
   try {
     const cabecalho = String(req.headers.authorization || "");
     const token = cabecalho.startsWith("Bearer ") ? cabecalho.slice(7).trim() : "";
-    if (!token) return res.status(401).json({ autenticado:false, erro:"Sess„o n„o informada" });
+    if (!token) return res.status(401).json({ autenticado:false, erro:"Sess√£o n√£o informada" });
 
     const payload = jwt.verify(token, segredoCrmJwt(), {
       issuer: "avante-cx",
       audience: "avante-cx-web"
     });
 
-    if (payload.tipo !== "crm") return res.status(401).json({ autenticado:false, erro:"Sess„o inv·lida" });
+    if (payload.tipo !== "crm") return res.status(401).json({ autenticado:false, erro:"Sess√£o inv√°lida" });
     req.usuarioCrm = payload;
     next();
   } catch (erro) {
-    return res.status(401).json({ autenticado:false, expirada:erro?.name === "TokenExpiredError", erro:"Sess„o inv·lida ou expirada" });
+    return res.status(401).json({ autenticado:false, expirada:erro?.name === "TokenExpiredError", erro:"Sess√£o inv√°lida ou expirada" });
   }
 }
 
@@ -173,7 +173,7 @@ router.get("/crm-auth-status", async (req, res) => {
     });
   } catch (erro) {
     console.error(erro);
-    res.status(500).json({ sucesso:false, erro:"Falha ao validar autenticaÁ„o CRM" });
+    res.status(500).json({ sucesso:false, erro:"Falha ao validar autentica√ß√£o CRM" });
   }
 });
 
@@ -197,19 +197,19 @@ router.post("/crm-login", async (req, res) => {
 
     if (!resultado.rows.length) {
       registrarFalhaCrm(chaveRate);
-      return res.status(401).json({ erro:"Login ou senha inv·lidos." });
+      return res.status(401).json({ erro:"Login ou senha inv√°lidos." });
     }
 
     const usuario = resultado.rows[0];
 
     if (String(usuario.status || "").trim().toUpperCase() !== "ATIVO") {
       registrarFalhaCrm(chaveRate);
-      return res.status(401).json({ erro:"Login ou senha inv·lidos." });
+      return res.status(401).json({ erro:"Login ou senha inv√°lidos." });
     }
 
     if (!usuario.senha_hash || !usuario.senha_salt) {
       registrarFalhaCrm(chaveRate);
-      return res.status(401).json({ erro:"Login ou senha inv·lidos." });
+      return res.status(401).json({ erro:"Login ou senha inv√°lidos." });
     }
 
     const hashInformado = hashSenhaLegada(senha, usuario.senha_salt);
@@ -220,7 +220,7 @@ router.post("/crm-login", async (req, res) => {
 
     if (!senhaCorreta) {
       registrarFalhaCrm(chaveRate);
-      return res.status(401).json({ erro:"Login ou senha inv·lidos." });
+      return res.status(401).json({ erro:"Login ou senha inv√°lidos." });
     }
 
     limparFalhasCrm(chaveRate);
@@ -240,10 +240,10 @@ router.post("/crm-login", async (req, res) => {
 
     db.query(`
       UPDATE usuarios_legado
-      SET ˙ltimo_acesso = NOW(), data_atualizacao = NOW()
+      SET √∫ltimo_acesso = NOW(), data_atualizacao = NOW()
       WHERE usuario_id = $1
     `, [usuario.usuario_id]).catch((erro) => {
-      console.warn("N„o foi possÌvel atualizar ˙ltimo_acesso:", erro?.message || erro);
+      console.warn("N√£o foi poss√≠vel atualizar √∫ltimo_acesso:", erro?.message || erro);
     });
 
     res.json({
@@ -269,17 +269,17 @@ router.get("/crm-me", verificarTokenCrm, async (req, res) => {
       LIMIT 1
     `, [req.usuarioCrm.id]);
 
-    if (!resultado.rows.length) return res.status(401).json({ autenticado:false, erro:"Usu·rio n„o encontrado." });
+    if (!resultado.rows.length) return res.status(401).json({ autenticado:false, erro:"Usu√°rio n√£o encontrado." });
 
     const usuario = resultado.rows[0];
     if (String(usuario.status || "").trim().toUpperCase() !== "ATIVO") {
-      return res.status(403).json({ autenticado:false, erro:"Usu·rio inativo." });
+      return res.status(403).json({ autenticado:false, erro:"Usu√°rio inativo." });
     }
 
     res.json({ autenticado:true, usuario:montarUsuarioPublico(usuario) });
   } catch (erro) {
     console.error(erro);
-    res.status(500).json({ autenticado:false, erro:"Erro ao validar sess„o." });
+    res.status(500).json({ autenticado:false, erro:"Erro ao validar sess√£o." });
   }
 });
 
@@ -307,7 +307,7 @@ router.get("/crm-dashboard", verificarTokenCrm, async (req, res) => {
 
     if (!usuarioResultado.rows.length) {
       return res.status(401).json({
-        erro: "Usu·rio n„o encontrado."
+        erro: "Usu√°rio n√£o encontrado."
       });
     }
 
@@ -316,7 +316,7 @@ router.get("/crm-dashboard", verificarTokenCrm, async (req, res) => {
 
     if (!publico.permissoes?.PODE_DASHBOARD) {
       return res.status(403).json({
-        erro: "VocÍ n„o possui permiss„o para acessar o Dashboard."
+        erro: "Voc√™ n√£o possui permiss√£o para acessar o Dashboard."
       });
     }
 
@@ -490,7 +490,7 @@ router.get("/crm-dashboard", verificarTokenCrm, async (req, res) => {
 
 
 // ======================================================
-// CRM - PRIMEIRO ACESSO E RECUPERA«√O 100% NODE/POSTGRESQL
+// CRM - PRIMEIRO ACESSO E RECUPERA√á√ÉO 100% NODE/POSTGRESQL
 // ======================================================
 
 const CRM_TOKEN_MAX_TENTATIVAS = 5;
@@ -517,7 +517,7 @@ function validarSenhaForteCrm_(senha) {
 
   if (!/[A-Za-z]/.test(valor) || !/\d/.test(valor)) {
     const erro = new Error(
-      "A senha deve possuir letras e n˙meros."
+      "A senha deve possuir letras e n√∫meros."
     );
     erro.statusCode = 400;
     throw erro;
@@ -534,7 +534,7 @@ function hashCodigoCrm_(tipo, codigo) {
 
   if (!segredo) {
     throw new Error(
-      "AVANTE_AUTH_SECRET_V1 n„o configurado no Railway"
+      "AVANTE_AUTH_SECRET_V1 n√£o configurado no Railway"
     );
   }
 
@@ -653,7 +653,7 @@ function limitarAcaoPublicaCrm_(tipo, alvo) {
 
   if (atual.total > 5) {
     const erro = new Error(
-      "Muitas solicitaÁıes. Aguarde alguns minutos e tente novamente."
+      "Muitas solicita√ß√µes. Aguarde alguns minutos e tente novamente."
     );
     erro.statusCode = 429;
     throw erro;
@@ -736,7 +736,7 @@ async function enviarEmailCrm_({
 
   if (!apiKey || !remetente) {
     throw new Error(
-      "ServiÁo de e-mail n„o configurado no Railway. Configure RESEND_API_KEY e AVANTE_EMAIL_FROM."
+      "Servi√ßo de e-mail n√£o configurado no Railway. Configure RESEND_API_KEY e AVANTE_EMAIL_FROM."
     );
   }
 
@@ -772,7 +772,7 @@ async function enviarEmailCrm_({
       ("HTTP " + resposta.status);
 
     throw new Error(
-      "N„o foi possÌvel enviar o e-mail. " +
+      "N√£o foi poss√≠vel enviar o e-mail. " +
       String(detalhe)
     );
   }
@@ -791,7 +791,7 @@ function escaparHtmlCrm_(valor) {
 
 
 // ------------------------------------------------------
-// CADASTRO P⁄BLICO
+// CADASTRO P√öBLICO
 // ------------------------------------------------------
 
 router.post(
@@ -840,7 +840,7 @@ router.post(
       ) {
         return res.status(400).json({
           erro:
-            "Informe um e-mail v·lido."
+            "Informe um e-mail v√°lido."
         });
       }
 
@@ -897,13 +897,13 @@ router.post(
         ) {
           return res.status(409).json({
             erro:
-              "J· existe um usu·rio cadastrado com este e-mail."
+              "J√° existe um usu√°rio cadastrado com este e-mail."
           });
         }
 
         return res.status(409).json({
           erro:
-            "Este login j· est· em uso."
+            "Este login j√° est√° em uso."
         });
       }
 
@@ -995,17 +995,17 @@ router.post(
         await enviarEmailCrm_({
           para: email,
           assunto:
-            "AVANTE CX | Token de liberaÁ„o do primeiro acesso",
+            "AVANTE CX | Token de libera√ß√£o do primeiro acesso",
           html:
             "<h2>AVANTE CX</h2>" +
-            "<p>Ol·, " +
+            "<p>Ol√°, " +
             escaparHtmlCrm_(nome) +
             ".</p>" +
-            "<p>Seu token de liberaÁ„o È:</p>" +
+            "<p>Seu token de libera√ß√£o √©:</p>" +
             "<h1 style=\"letter-spacing:6px\">" +
             codigo +
             "</h1>" +
-            "<p>Este token È de uso ˙nico e tem validade de " +
+            "<p>Este token √© de uso √∫nico e tem validade de " +
             CRM_ATIVACAO_MINUTOS +
             " minutos.</p>"
         });
@@ -1025,7 +1025,7 @@ router.post(
         sucesso: true,
         identificador: email,
         mensagem:
-          "Cadastro realizado. Enviamos um token de 6 dÌgitos para o seu e-mail."
+          "Cadastro realizado. Enviamos um token de 6 d√≠gitos para o seu e-mail."
       });
 
     } catch (erro) {
@@ -1047,7 +1047,7 @@ router.post(
           status === 500
             ? (
                 erro?.message ||
-                "N„o foi possÌvel realizar o cadastro."
+                "N√£o foi poss√≠vel realizar o cadastro."
               )
             : erro.message
       });
@@ -1095,7 +1095,7 @@ router.post(
       ) {
         return res.status(400).json({
           erro:
-            "Token inv·lido ou cadastro n„o encontrado."
+            "Token inv√°lido ou cadastro n√£o encontrado."
         });
       }
 
@@ -1105,7 +1105,7 @@ router.post(
       ) {
         return res.status(400).json({
           erro:
-            "Token inv·lido ou expirado."
+            "Token inv√°lido ou expirado."
         });
       }
 
@@ -1120,7 +1120,7 @@ router.post(
       ) {
         return res.status(400).json({
           erro:
-            "Token inv·lido ou expirado."
+            "Token inv√°lido ou expirado."
         });
       }
 
@@ -1148,7 +1148,7 @@ router.post(
 
         return res.status(400).json({
           erro:
-            "Token inv·lido ou expirado."
+            "Token inv√°lido ou expirado."
         });
       }
 
@@ -1174,7 +1174,7 @@ router.post(
           usuario.login ||
           usuario.email,
         mensagem:
-          "Acesso liberado com sucesso. Agora vocÍ j· pode entrar no AVANTE CX."
+          "Acesso liberado com sucesso. Agora voc√™ j√° pode entrar no AVANTE CX."
       });
 
     } catch (erro) {
@@ -1191,7 +1191,7 @@ router.post(
         .json({
           erro:
             erro?.message ||
-            "N„o foi possÌvel liberar o acesso."
+            "N√£o foi poss√≠vel liberar o acesso."
         });
     }
   }
@@ -1199,7 +1199,7 @@ router.post(
 
 
 // ------------------------------------------------------
-// REENVIAR TOKEN DE ATIVA«√O
+// REENVIAR TOKEN DE ATIVA√á√ÉO
 // ------------------------------------------------------
 
 router.post(
@@ -1208,7 +1208,7 @@ router.post(
     const respostaGenerica = {
       sucesso: true,
       mensagem:
-        "Se houver um cadastro pendente, um novo token ser· enviado ao e-mail."
+        "Se houver um cadastro pendente, um novo token ser√° enviado ao e-mail."
     };
 
     try {
@@ -1278,10 +1278,10 @@ router.post(
       await enviarEmailCrm_({
         para: usuario.email,
         assunto:
-          "AVANTE CX | Novo token de liberaÁ„o",
+          "AVANTE CX | Novo token de libera√ß√£o",
         html:
           "<h2>AVANTE CX</h2>" +
-          "<p>Seu novo token de liberaÁ„o È:</p>" +
+          "<p>Seu novo token de libera√ß√£o √©:</p>" +
           "<h1 style=\"letter-spacing:6px\">" +
           codigo +
           "</h1>" +
@@ -1310,7 +1310,7 @@ router.post(
             ? erro.message
             : (
                 erro?.message ||
-                "N„o foi possÌvel reenviar o token."
+                "N√£o foi poss√≠vel reenviar o token."
               )
       });
     }
@@ -1319,7 +1319,7 @@ router.post(
 
 
 // ------------------------------------------------------
-// PRIMEIRO ACESSO DE USU¡RIO CRIADO PELO ADMIN
+// PRIMEIRO ACESSO DE USU√ÅRIO CRIADO PELO ADMIN
 // ------------------------------------------------------
 
 router.post(
@@ -1346,7 +1346,7 @@ router.post(
       if (!r.rows.length) {
         return res.status(401).json({
           erro:
-            "Usu·rio n„o encontrado."
+            "Usu√°rio n√£o encontrado."
         });
       }
 
@@ -1360,7 +1360,7 @@ router.post(
       ) {
         return res.status(403).json({
           erro:
-            "Usu·rio inativo."
+            "Usu√°rio inativo."
         });
       }
 
@@ -1371,7 +1371,7 @@ router.post(
       ) {
         return res.status(400).json({
           erro:
-            "O primeiro acesso j· foi concluÌdo."
+            "O primeiro acesso j√° foi conclu√≠do."
         });
       }
 
@@ -1428,7 +1428,7 @@ router.post(
         .json({
           erro:
             erro?.message ||
-            "N„o foi possÌvel definir a senha."
+            "N√£o foi poss√≠vel definir a senha."
         });
     }
   }
@@ -1436,7 +1436,7 @@ router.post(
 
 
 // ------------------------------------------------------
-// SOLICITAR RECUPERA«√O
+// SOLICITAR RECUPERA√á√ÉO
 // ------------------------------------------------------
 
 router.post(
@@ -1445,7 +1445,7 @@ router.post(
     const respostaGenerica = {
       sucesso: true,
       mensagem:
-        "Se o usu·rio estiver cadastrado e ativo, enviaremos um cÛdigo ao e-mail informado no cadastro."
+        "Se o usu√°rio estiver cadastrado e ativo, enviaremos um c√≥digo ao e-mail informado no cadastro."
     };
 
     try {
@@ -1513,10 +1513,10 @@ router.post(
       await enviarEmailCrm_({
         para: usuario.email,
         assunto:
-          "AVANTE CX | RecuperaÁ„o de senha",
+          "AVANTE CX | Recupera√ß√£o de senha",
         html:
           "<h2>AVANTE CX</h2>" +
-          "<p>Seu cÛdigo de recuperaÁ„o È:</p>" +
+          "<p>Seu c√≥digo de recupera√ß√£o √©:</p>" +
           "<h1 style=\"letter-spacing:6px\">" +
           codigo +
           "</h1>" +
@@ -1546,8 +1546,8 @@ router.post(
       }
 
       /*
-       * MantÈm resposta genÈrica para n„o revelar
-       * existÍncia ou estado da conta.
+       * Mant√©m resposta gen√©rica para n√£o revelar
+       * exist√™ncia ou estado da conta.
        */
       return res.json(
         respostaGenerica
@@ -1558,7 +1558,7 @@ router.post(
 
 
 // ------------------------------------------------------
-// REDEFINIR SENHA COM C”DIGO
+// REDEFINIR SENHA COM C√ìDIGO
 // ------------------------------------------------------
 
 router.post(
@@ -1589,7 +1589,7 @@ router.post(
       ) {
         return res.status(400).json({
           erro:
-            "CÛdigo inv·lido ou expirado."
+            "C√≥digo inv√°lido ou expirado."
         });
       }
 
@@ -1607,7 +1607,7 @@ router.post(
       ) {
         return res.status(400).json({
           erro:
-            "CÛdigo inv·lido ou expirado."
+            "C√≥digo inv√°lido ou expirado."
         });
       }
 
@@ -1622,7 +1622,7 @@ router.post(
       ) {
         return res.status(400).json({
           erro:
-            "CÛdigo inv·lido ou expirado."
+            "C√≥digo inv√°lido ou expirado."
         });
       }
 
@@ -1650,7 +1650,7 @@ router.post(
 
         return res.status(400).json({
           erro:
-            "CÛdigo inv·lido ou expirado."
+            "C√≥digo inv√°lido ou expirado."
         });
       }
 
@@ -1703,18 +1703,18 @@ router.post(
         .json({
           erro:
             erro?.message ||
-            "N„o foi possÌvel redefinir a senha."
+            "N√£o foi poss√≠vel redefinir a senha."
         });
     }
   }
 );
 
 
-/* ROTAS T…CNICAS EXISTENTES - preservadas */
+/* ROTAS T√âCNICAS EXISTENTES - preservadas */
 router.post("/login", async (req, res) => {
   try {
     const { email, senha } = req.body;
-    if (!email || !senha) return res.status(400).json({ erro:"Email e senha s„o obrigatÛrios" });
+    if (!email || !senha) return res.status(400).json({ erro:"Email e senha s√£o obrigat√≥rios" });
 
     const resultado = await db.query(`
       SELECT id, nome, email, senha_hash, perfil, ativo
@@ -1723,12 +1723,12 @@ router.post("/login", async (req, res) => {
       LIMIT 1
     `, [email]);
 
-    if (resultado.rows.length === 0) return res.status(401).json({ erro:"Email ou senha inv·lidos" });
+    if (resultado.rows.length === 0) return res.status(401).json({ erro:"Email ou senha inv√°lidos" });
     const usuario = resultado.rows[0];
-    if (!usuario.ativo) return res.status(403).json({ erro:"Usu·rio inativo" });
+    if (!usuario.ativo) return res.status(403).json({ erro:"Usu√°rio inativo" });
 
     const senhaCorreta = await bcrypt.compare(senha, usuario.senha_hash);
-    if (!senhaCorreta) return res.status(401).json({ erro:"Email ou senha inv·lidos" });
+    if (!senhaCorreta) return res.status(401).json({ erro:"Email ou senha inv√°lidos" });
 
     const token = jwt.sign({ id:usuario.id, email:usuario.email, perfil:usuario.perfil }, process.env.JWT_SECRET, { expiresIn:"8h" });
 
@@ -1752,13 +1752,13 @@ router.get("/me", verificarToken, async (req, res) => {
       LIMIT 1
     `, [req.usuario.id]);
 
-    if (resultado.rows.length === 0) return res.status(404).json({ erro:"Usu·rio n„o encontrado" });
+    if (resultado.rows.length === 0) return res.status(404).json({ erro:"Usu√°rio n√£o encontrado" });
     const usuario = resultado.rows[0];
-    if (!usuario.ativo) return res.status(403).json({ erro:"Usu·rio inativo" });
+    if (!usuario.ativo) return res.status(403).json({ erro:"Usu√°rio inativo" });
     res.json({ usuario });
   } catch (erro) {
     console.error(erro);
-    res.status(500).json({ erro:"Erro ao buscar usu·rio" });
+    res.status(500).json({ erro:"Erro ao buscar usu√°rio" });
   }
 });
 
@@ -1780,7 +1780,7 @@ router.get("/crm-financeiro", verificarTokenCrm, async (req, res) => {
     if (!usuarioR.rows.length) {
       return res.status(401).json({
         autenticado:false,
-        erro:"Usu·rio n„o encontrado."
+        erro:"Usu√°rio n√£o encontrado."
       });
     }
 
@@ -1792,7 +1792,7 @@ router.get("/crm-financeiro", verificarTokenCrm, async (req, res) => {
 
     if (!permitido) {
       return res.status(403).json({
-        erro:"VocÍ n„o possui permiss„o para acessar o Financeiro."
+        erro:"Voc√™ n√£o possui permiss√£o para acessar o Financeiro."
       });
     }
 
